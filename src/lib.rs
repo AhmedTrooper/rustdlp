@@ -11,6 +11,7 @@ pub use core::types::{FormatId, MediaType, Protocol, Resolution, VideoId};
 pub use downloader::{
     AdaptiveDownloader, HlsDownloader, HttpDownloader, SingleStreamDownloader, StreamDownloader,
 };
+pub use extractor::facebook::FacebookExtractor;
 pub use extractor::traits::Extractor;
 pub use extractor::youtube::{SubtitleDownloader, YoutubeExtractor, YoutubePlaylistExtractor};
 pub use models::format::StreamFormat;
