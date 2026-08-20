@@ -31,7 +31,11 @@ pub fn print_video_info(meta: &VideoMetadata) {
 
 pub fn print_subtitles_table(meta: &VideoMetadata) {
     if meta.subtitles.is_empty() {
-        println!("{} No subtitles available for {}", "[info]".blue().bold(), meta.id.as_str().cyan());
+        println!(
+            "{} No subtitles available for {}",
+            "[info]".blue().bold(),
+            meta.id.as_str().cyan()
+        );
         return;
     }
 
@@ -40,11 +44,20 @@ pub fn print_subtitles_table(meta: &VideoMetadata) {
         "[info]".blue().bold(),
         meta.id.as_str().cyan()
     );
-    println!("{:<10} {:<30} {}", "Language".bold(), "Name".bold(), "Type".bold());
+    println!(
+        "{:<10} {:<30} {}",
+        "Language".bold(),
+        "Name".bold(),
+        "Type".bold()
+    );
     println!("{}", "─".repeat(60).dimmed());
 
     for sub in &meta.subtitles {
-        let kind = if sub.is_auto_generated { "auto-generated (ASR)".yellow() } else { "manual".green() };
+        let kind = if sub.is_auto_generated {
+            "auto-generated (ASR)".yellow()
+        } else {
+            "manual".green()
+        };
         println!("{:<10} {:<30} {}", sub.language_code.cyan(), sub.name, kind);
     }
 }
@@ -84,7 +97,10 @@ pub fn print_format_table(meta: &VideoMetadata) {
         };
 
         let fps_str = f.fps.map(|fps| fps.to_string()).unwrap_or_default();
-        let ch_str = f.audio_channels.map(|ch| ch.to_string()).unwrap_or_default();
+        let ch_str = f
+            .audio_channels
+            .map(|ch| ch.to_string())
+            .unwrap_or_default();
 
         let size_str = match (f.filesize, f.filesize_approx) {
             (Some(sz), _) => format_bytes(sz),
@@ -95,8 +111,16 @@ pub fn print_format_table(meta: &VideoMetadata) {
         let tbr_str = f.bitrate.map(format_bitrate).unwrap_or_default();
         let proto_str = f.protocol.to_string();
 
-        let vcodec_str = f.vcodec.as_deref().unwrap_or(if f.is_audio_only() { "audio only" } else { "none" });
-        let acodec_str = f.acodec.as_deref().unwrap_or(if f.is_video_only() { "video only" } else { "none" });
+        let vcodec_str = f.vcodec.as_deref().unwrap_or(if f.is_audio_only() {
+            "audio only"
+        } else {
+            "none"
+        });
+        let acodec_str = f.acodec.as_deref().unwrap_or(if f.is_video_only() {
+            "video only"
+        } else {
+            "none"
+        });
 
         let mut more_info = Vec::new();
         if let Some(ref ql) = f.quality_label {

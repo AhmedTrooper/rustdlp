@@ -18,11 +18,19 @@ pub struct CliArgs {
     pub list_formats: bool,
 
     /// Video format code / selection expression (e.g. "best", "bestvideo+bestaudio", "137+140", "1080p", "mp4")
-    #[arg(short = 'f', long = "format", default_value = "bestvideo+bestaudio/best")]
+    #[arg(
+        short = 'f',
+        long = "format",
+        default_value = "bestvideo+bestaudio/best"
+    )]
     pub format: String,
 
     /// Output filename template (e.g. "%(title)s [%(id)s].%(ext)s")
-    #[arg(short = 'o', long = "output", default_value = "%(title)s [%(id)s].%(ext)s")]
+    #[arg(
+        short = 'o',
+        long = "output",
+        default_value = "%(title)s [%(id)s].%(ext)s"
+    )]
     pub output: String,
 
     /// Convert video to audio-only file

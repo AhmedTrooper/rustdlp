@@ -1,6 +1,6 @@
 use clap::Parser;
 use colored::*;
-use rustdlp::cli::{print_format_table, print_subtitles_table, print_video_info, CliArgs};
+use rustdlp::cli::{CliArgs, print_format_table, print_subtitles_table, print_video_info};
 use rustdlp::core::config::DlpConfig;
 use rustdlp::core::error::Result;
 use rustdlp::core::utils::resolve_output_path;
@@ -27,15 +27,20 @@ async fn main() -> Result<()> {
     let playlist_id = extract_playlist_id(&args.url);
     let is_playlist_request = playlist_id.is_some() && (args.yes_playlist || !args.no_playlist);
 
-    if let (Some(ref pl_id), true) = (playlist_id, is_playlist_request) {
-        if !args.no_playlist {
-            return process_playlist(&args, pl_id, &http_client).await;
-        }
+    if let (Some(ref pl_id), true) = (playlist_id, is_playlist_request)
+        && !args.no_playlist
+    {
+        return process_playlist(&args, pl_id, &http_client).await;
     }
 
     // 3. Process Single Video
     let extractor = YoutubeExtractor::with_http_client(http_client.clone());
-    let metadata = match extractor.extract_by_id(&rustdlp::extractor::youtube::url::extract_video_id(&args.url)?).await {
+    let metadata = match extractor
+        .extract_by_id(&rustdlp::extractor::youtube::url::extract_video_id(
+            &args.url,
+        )?)
+        .await
+    {
         Ok(meta) => meta,
         Err(err) => {
             eprintln!("{} {}", "ERROR:".red().bold(), err);
@@ -110,16 +115,29 @@ async fn process_playlist(
         match extractor.extract_by_id(&item.id).await {
             Ok(video_meta) => {
                 if let Err(e) = process_single_video(args, &video_meta, http_client).await {
-                    eprintln!("{} Failed to download {}: {}", "WARNING:".yellow().bold(), item.id, e);
+                    eprintln!(
+                        "{} Failed to download {}: {}",
+                        "WARNING:".yellow().bold(),
+                        item.id,
+                        e
+                    );
                 }
             }
             Err(e) => {
-                eprintln!("{} Failed to extract {}: {}", "WARNING:".yellow().bold(), item.id, e);
+                eprintln!(
+                    "{} Failed to extract {}: {}",
+                    "WARNING:".yellow().bold(),
+                    item.id,
+                    e
+                );
             }
         }
     }
 
-    println!("\n{} Playlist download complete!", "[download]".green().bold());
+    println!(
+        "\n{} Playlist download complete!",
+        "[download]".green().bold()
+    );
     Ok(())
 }
 
@@ -189,7 +207,11 @@ async fn process_single_video(
                     &metadata.uploader,
                     &sub_filename,
                 );
-                if sub_downloader.download_subtitle(track, &args.sub_format, &sub_path).await.is_ok() {
+                if sub_downloader
+                    .download_subtitle(track, &args.sub_format, &sub_path)
+                    .await
+                    .is_ok()
+                {
                     downloaded_subs.push((track.language_code.clone(), sub_path));
                 }
             }
@@ -244,16 +266,24 @@ async fn process_single_video(
             }
         }
 
-        if args.embed_thumbnail {
-            if let Some(ref tp) = thumb_path {
-                let embedded_path = final_audio_path.with_extension(format!("embed.{}", args.audio_format));
-                if FFmpeg::embed_thumbnail(&final_audio_path, tp, &embedded_path).await.is_ok() {
-                    let _ = tokio::fs::rename(&embedded_path, &final_audio_path).await;
-                }
+        if args.embed_thumbnail
+            && let Some(ref tp) = thumb_path
+        {
+            let embedded_path =
+                final_audio_path.with_extension(format!("embed.{}", args.audio_format));
+            if FFmpeg::embed_thumbnail(&final_audio_path, tp, &embedded_path)
+                .await
+                .is_ok()
+            {
+                let _ = tokio::fs::rename(&embedded_path, &final_audio_path).await;
             }
         }
 
-        println!("{} Download completed: {}", "[download]".green().bold(), final_audio_path.display());
+        println!(
+            "{} Download completed: {}",
+            "[download]".green().bold(),
+            final_audio_path.display()
+        );
         return Ok(());
     }
 
@@ -266,9 +296,7 @@ async fn process_single_video(
         }
     };
 
-    let mut final_media_path = PathBuf::new();
-
-    match selected {
+    let final_media_path = match selected {
         SelectedFormat::Single(stream) => {
             println!(
                 "{} Selected single stream itag {} ({})",
@@ -287,7 +315,7 @@ async fn process_single_video(
 
             let downloader = SingleStreamDownloader::new();
             downloader.download(&stream, &output_path).await?;
-            final_media_path = output_path;
+            output_path
         }
         SelectedFormat::Dual { video, audio } => {
             println!(
@@ -318,30 +346,40 @@ async fn process_single_video(
                 .download_and_merge(&video, &audio, &output_path, args.keep_video)
                 .await?;
 
-            final_media_path = output_path;
+            output_path
         }
-    }
+    };
 
     // Post-processing: Embed subtitles if requested
     if args.embed_subs && !downloaded_subs.is_empty() {
         let (lang, sub_path) = &downloaded_subs[0];
         let sub_embedded_path = final_media_path.with_extension("sub.mp4");
-        if FFmpeg::embed_subtitles(&final_media_path, sub_path, lang, &sub_embedded_path).await.is_ok() {
+        if FFmpeg::embed_subtitles(&final_media_path, sub_path, lang, &sub_embedded_path)
+            .await
+            .is_ok()
+        {
             let _ = tokio::fs::rename(&sub_embedded_path, &final_media_path).await;
         }
     }
 
     // Post-processing: Embed thumbnail if requested
-    if args.embed_thumbnail {
-        if let Some(ref tp) = thumb_path {
-            let thumb_embedded_path = final_media_path.with_extension("thumb.mp4");
-            if FFmpeg::embed_thumbnail(&final_media_path, tp, &thumb_embedded_path).await.is_ok() {
-                let _ = tokio::fs::rename(&thumb_embedded_path, &final_media_path).await;
-            }
+    if args.embed_thumbnail
+        && let Some(ref tp) = thumb_path
+    {
+        let thumb_embedded_path = final_media_path.with_extension("thumb.mp4");
+        if FFmpeg::embed_thumbnail(&final_media_path, tp, &thumb_embedded_path)
+            .await
+            .is_ok()
+        {
+            let _ = tokio::fs::rename(&thumb_embedded_path, &final_media_path).await;
         }
     }
 
-    println!("{} Download completed: {}", "[download]".green().bold(), final_media_path.display());
+    println!(
+        "{} Download completed: {}",
+        "[download]".green().bold(),
+        final_media_path.display()
+    );
     Ok(())
 }
 
@@ -350,15 +388,20 @@ fn parse_playlist_items_expr(expr: &str, total: usize) -> Vec<usize> {
     for part in expr.split(',') {
         let part = part.trim();
         if let Some((start_s, end_s)) = part.split_once('-') {
-            let start: usize = start_s.trim().parse::<usize>().unwrap_or(1).saturating_sub(1);
+            let start: usize = start_s
+                .trim()
+                .parse::<usize>()
+                .unwrap_or(1)
+                .saturating_sub(1);
             let end: usize = end_s.trim().parse::<usize>().unwrap_or(total).min(total);
             for i in start..end {
                 indices.push(i);
             }
-        } else if let Ok(num) = part.parse::<usize>() {
-            if num >= 1 && num <= total {
-                indices.push(num - 1);
-            }
+        } else if let Ok(num) = part.parse::<usize>()
+            && num >= 1
+            && num <= total
+        {
+            indices.push(num - 1);
         }
     }
     indices
