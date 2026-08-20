@@ -4,6 +4,7 @@ use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use std::path::{Path, PathBuf};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 use url::Url;
 
 pub struct HlsDownloader {
@@ -22,9 +23,31 @@ impl HlsDownloader {
         user_agent: Option<&str>,
     ) -> Result<()> {
         let ua = user_agent.unwrap_or(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
         );
 
+        // 1. Try ffmpeg native stream copy for HLS/fMP4 manifests
+        if let Ok(mut child) = Command::new("ffmpeg")
+            .arg("-y")
+            .arg("-hide_banner")
+            .arg("-loglevel")
+            .arg("error")
+            .arg("-headers")
+            .arg(format!("User-Agent: {}\r\n", ua))
+            .arg("-i")
+            .arg(manifest_url)
+            .arg("-c")
+            .arg("copy")
+            .arg(output_path)
+            .spawn()
+            && let Ok(status) = child.wait().await
+            && status.success()
+            && output_path.exists()
+        {
+            return Ok(());
+        }
+
+        // 2. Fallback: Native segment downloader
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
@@ -70,7 +93,7 @@ impl HlsDownloader {
         };
 
         let media_base_url = Url::parse(&target_playlist_url)
-            .map_err(|e| DlpError::DownloadError(format!("Invalid HLS media URL: {}", e)))?;
+            .map_err(|e| DlpError::DownloadError(format!("Invalid media playlist URL: {}", e)))?;
 
         let mut segment_urls = Vec::new();
         for line in media_playlist_text.lines() {

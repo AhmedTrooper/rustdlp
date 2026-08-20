@@ -62,6 +62,13 @@ impl FormatSelector {
         if let Some((v_expr, a_expr)) = expr.split_once('+') {
             let v_format = Self::find_video_format(formats, v_expr.trim())?;
             let a_format = Self::find_audio_format(formats, a_expr.trim())?;
+
+            if (v_format.is_combined() || a_format.is_combined())
+                && v_format.format_id == a_format.format_id
+            {
+                return Ok(SelectedFormat::Single(v_format));
+            }
+
             return Ok(SelectedFormat::Dual {
                 video: v_format,
                 audio: a_format,
@@ -71,7 +78,10 @@ impl FormatSelector {
         // Single format selection
         match expr {
             "best" | "" => {
-                if let (Ok(v), Ok(a)) = (Self::best_video(formats), Self::best_audio(formats)) {
+                if let (Ok(v), Ok(a)) = (
+                    Self::best_video_only(formats),
+                    Self::best_audio_only(formats),
+                ) {
                     Ok(SelectedFormat::Dual { video: v, audio: a })
                 } else if let Some(comb) = Self::best_combined(formats) {
                     Ok(SelectedFormat::Single(comb))
@@ -136,155 +146,177 @@ impl FormatSelector {
                     }
                 }
             }
-            itag_or_res => {
-                if let Some(f) = formats.iter().find(|f| {
-                    f.format_id.as_str() == itag_or_res || f.itag.to_string() == itag_or_res
-                }) {
-                    return Ok(SelectedFormat::Single(f.clone()));
-                }
-
-                let target_height: Option<u32> = itag_or_res.trim_end_matches('p').parse().ok();
-                if let Some(h) = target_height
-                    && let Some(v) = formats
-                        .iter()
-                        .filter(|f| f.height() == h && f.is_video())
-                        .max_by_key(|f| (f.effective_fps(), f.effective_bitrate()))
-                {
-                    if v.is_combined() {
-                        return Ok(SelectedFormat::Single(v.clone()));
-                    } else if let Ok(a) = Self::best_audio(formats) {
-                        return Ok(SelectedFormat::Dual {
-                            video: v.clone(),
-                            audio: a,
-                        });
-                    } else {
-                        return Ok(SelectedFormat::Single(v.clone()));
-                    }
-                }
-
-                Err(DlpError::NoFormatFound(expr.to_string()))
+            height_str if height_str.ends_with('p') => {
+                let target_h: u32 = height_str[..height_str.len() - 1]
+                    .parse()
+                    .map_err(|_| DlpError::NoFormatFound(expr.to_string()))?;
+                Self::find_by_resolution(formats, target_h)
             }
+            itag_str if itag_str.parse::<u32>().is_ok() => {
+                let itag: u32 = itag_str.parse().unwrap();
+                formats
+                    .iter()
+                    .find(|f| f.itag == itag)
+                    .cloned()
+                    .map(SelectedFormat::Single)
+                    .ok_or_else(|| DlpError::NoFormatFound(format!("itag {}", itag)))
+            }
+            id_str => formats
+                .iter()
+                .find(|f| f.format_id.as_str() == id_str)
+                .cloned()
+                .map(SelectedFormat::Single)
+                .ok_or_else(|| DlpError::NoFormatFound(id_str.to_string())),
         }
     }
 
     fn find_video_format(formats: &[StreamFormat], expr: &str) -> Result<StreamFormat> {
         match expr {
-            "bestvideo" | "best" => Self::best_video(formats),
-            "worstvideo" | "worst" => Self::worst_video(formats),
-            other => {
-                if let Some(f) = formats
-                    .iter()
-                    .find(|f| f.format_id.as_str() == other || f.itag.to_string() == other)
-                {
-                    Ok(f.clone())
-                } else if let Ok(h) = other.trim_end_matches('p').parse::<u32>() {
-                    formats
-                        .iter()
-                        .filter(|f| f.height() == h && f.is_video())
-                        .max_by_key(|f| (f.effective_fps(), f.effective_bitrate()))
-                        .cloned()
-                        .ok_or_else(|| DlpError::NoFormatFound(format!("Video resolution {}p", h)))
-                } else {
-                    Err(DlpError::NoFormatFound(format!(
-                        "Video selector '{}'",
-                        other
-                    )))
-                }
+            "bestvideo" | "best" => {
+                Self::best_video_only(formats).or_else(|_| Self::best_video(formats))
             }
+            "worstvideo" | "worst" => Self::worst_video(formats),
+            h if h.ends_with('p') => {
+                let target: u32 = h[..h.len() - 1]
+                    .parse()
+                    .map_err(|_| DlpError::NoFormatFound(expr.to_string()))?;
+                formats
+                    .iter()
+                    .filter(|f| f.is_video() && f.height() <= target)
+                    .max_by_key(|f| (f.height(), f.effective_bitrate()))
+                    .cloned()
+                    .ok_or_else(|| DlpError::NoFormatFound(expr.to_string()))
+            }
+            itag if itag.parse::<u32>().is_ok() => {
+                let itag_num: u32 = itag.parse().unwrap();
+                formats
+                    .iter()
+                    .find(|f| f.itag == itag_num && f.is_video())
+                    .cloned()
+                    .ok_or_else(|| DlpError::NoFormatFound(expr.to_string()))
+            }
+            id => formats
+                .iter()
+                .find(|f| f.format_id.as_str() == id && f.is_video())
+                .cloned()
+                .ok_or_else(|| DlpError::NoFormatFound(expr.to_string())),
         }
     }
 
     fn find_audio_format(formats: &[StreamFormat], expr: &str) -> Result<StreamFormat> {
         match expr {
-            "bestaudio" | "best" => Self::best_audio(formats),
-            "worstaudio" | "worst" => Self::worst_audio(formats),
-            "m4a" => Self::best_audio_ext(formats, "m4a"),
-            "opus" | "webm" => Self::best_audio_ext(formats, "webm"),
-            other => {
-                if let Some(f) = formats
-                    .iter()
-                    .find(|f| f.format_id.as_str() == other || f.itag.to_string() == other)
-                {
-                    Ok(f.clone())
-                } else {
-                    Err(DlpError::NoFormatFound(format!(
-                        "Audio selector '{}'",
-                        other
-                    )))
-                }
+            "bestaudio" | "best" => {
+                Self::best_audio_only(formats).or_else(|_| Self::best_audio(formats))
             }
+            "worstaudio" | "worst" => Self::worst_audio(formats),
+            itag if itag.parse::<u32>().is_ok() => {
+                let itag_num: u32 = itag.parse().unwrap();
+                formats
+                    .iter()
+                    .find(|f| f.itag == itag_num && f.is_audio())
+                    .cloned()
+                    .ok_or_else(|| DlpError::NoFormatFound(expr.to_string()))
+            }
+            id => formats
+                .iter()
+                .find(|f| f.format_id.as_str() == id && f.is_audio())
+                .cloned()
+                .ok_or_else(|| DlpError::NoFormatFound(expr.to_string())),
         }
     }
 
-    pub fn best_combined(formats: &[StreamFormat]) -> Option<StreamFormat> {
+    pub fn best_video_only(formats: &[StreamFormat]) -> Result<StreamFormat> {
         formats
-            .iter()
-            .filter(|f| f.is_combined() && f.height() > 0)
-            .max_by_key(|f| (f.height(), f.effective_fps(), f.effective_bitrate()))
-            .cloned()
-    }
-
-    pub fn best_video(formats: &[StreamFormat]) -> Result<StreamFormat> {
-        if let Some(f) = formats
             .iter()
             .filter(|f| f.is_video_only())
             .max_by_key(|f| (f.height(), f.effective_fps(), f.effective_bitrate()))
-        {
-            return Ok(f.clone());
-        }
+            .cloned()
+            .ok_or_else(|| DlpError::NoFormatFound("best video only".into()))
+    }
+
+    pub fn best_audio_only(formats: &[StreamFormat]) -> Result<StreamFormat> {
+        formats
+            .iter()
+            .filter(|f| f.is_audio_only())
+            .max_by_key(|f| f.effective_bitrate())
+            .cloned()
+            .ok_or_else(|| DlpError::NoFormatFound("best audio only".into()))
+    }
+
+    pub fn best_video(formats: &[StreamFormat]) -> Result<StreamFormat> {
         formats
             .iter()
             .filter(|f| f.is_video())
             .max_by_key(|f| (f.height(), f.effective_fps(), f.effective_bitrate()))
             .cloned()
-            .ok_or_else(|| DlpError::NoFormatFound("bestvideo".into()))
+            .ok_or_else(|| DlpError::NoFormatFound("best video".into()))
+    }
+
+    pub fn best_audio(formats: &[StreamFormat]) -> Result<StreamFormat> {
+        formats
+            .iter()
+            .filter(|f| f.is_audio())
+            .max_by_key(|f| f.effective_bitrate())
+            .cloned()
+            .ok_or_else(|| DlpError::NoFormatFound("best audio".into()))
     }
 
     pub fn worst_video(formats: &[StreamFormat]) -> Result<StreamFormat> {
         formats
             .iter()
-            .filter(|f| f.is_video() && f.height() > 0)
+            .filter(|f| f.is_video())
             .min_by_key(|f| (f.height(), f.effective_bitrate()))
             .cloned()
-            .ok_or_else(|| DlpError::NoFormatFound("worstvideo".into()))
-    }
-
-    pub fn best_audio(formats: &[StreamFormat]) -> Result<StreamFormat> {
-        if let Some(f) = formats
-            .iter()
-            .filter(|f| f.is_audio_only())
-            .max_by_key(|f| (f.effective_bitrate(), f.audio_sample_rate.unwrap_or(0)))
-        {
-            return Ok(f.clone());
-        }
-        formats
-            .iter()
-            .filter(|f| f.is_audio())
-            .max_by_key(|f| (f.effective_bitrate(), f.audio_sample_rate.unwrap_or(0)))
-            .cloned()
-            .ok_or_else(|| DlpError::NoFormatFound("bestaudio".into()))
+            .ok_or_else(|| DlpError::NoFormatFound("worst video".into()))
     }
 
     pub fn worst_audio(formats: &[StreamFormat]) -> Result<StreamFormat> {
         formats
             .iter()
-            .filter(|f| f.is_audio() && f.effective_bitrate() > 0)
+            .filter(|f| f.is_audio())
             .min_by_key(|f| f.effective_bitrate())
             .cloned()
-            .ok_or_else(|| DlpError::NoFormatFound("worstaudio".into()))
+            .ok_or_else(|| DlpError::NoFormatFound("worst audio".into()))
     }
 
-    pub fn best_audio_ext(formats: &[StreamFormat], ext: &str) -> Result<StreamFormat> {
+    pub fn best_combined(formats: &[StreamFormat]) -> Option<StreamFormat> {
         formats
             .iter()
-            .filter(|f| {
-                f.is_audio()
-                    && (f.ext == ext
-                        || (ext == "m4a" && f.ext == "mp4")
-                        || (ext == "opus" && f.ext == "webm"))
-            })
-            .max_by_key(|f| (f.effective_bitrate(), f.audio_sample_rate.unwrap_or(0)))
+            .filter(|f| f.is_combined())
+            .max_by_key(|f| (f.height(), f.effective_bitrate()))
             .cloned()
-            .ok_or_else(|| DlpError::NoFormatFound(format!("bestaudio [{}]", ext)))
+    }
+
+    fn best_audio_ext(formats: &[StreamFormat], ext: &str) -> Result<StreamFormat> {
+        formats
+            .iter()
+            .filter(|f| f.is_audio_only() && f.ext == ext)
+            .max_by_key(|f| f.effective_bitrate())
+            .cloned()
+            .ok_or_else(|| DlpError::NoFormatFound(format!("best {} audio", ext)))
+    }
+
+    fn find_by_resolution(formats: &[StreamFormat], target_height: u32) -> Result<SelectedFormat> {
+        if let Some(v) = formats
+            .iter()
+            .filter(|f| f.is_video_only() && f.height() <= target_height)
+            .max_by_key(|f| f.height())
+        {
+            let a = Self::best_audio(formats)?;
+            return Ok(SelectedFormat::Dual {
+                video: v.clone(),
+                audio: a,
+            });
+        }
+
+        if let Some(c) = formats
+            .iter()
+            .filter(|f| f.is_combined() && f.height() <= target_height)
+            .max_by_key(|f| f.height())
+        {
+            return Ok(SelectedFormat::Single(c.clone()));
+        }
+
+        Err(DlpError::NoFormatFound(format!("{}p", target_height)))
     }
 }
