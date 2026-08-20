@@ -33,3 +33,8 @@
 .idea/
 *.swp
 *.swo
+
+# Port tracking documentation
+PortTracker.md
+*tracker*
+*Tracker*
