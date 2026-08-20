@@ -23,6 +23,12 @@ pub fn print_video_info(meta: &VideoMetadata) {
         "[vimeo]"
     } else if meta.webpage_url.contains("soundcloud.com") {
         "[soundcloud]"
+    } else if meta.webpage_url.contains("twitch.tv") {
+        "[twitch]"
+    } else if meta.webpage_url.contains("pinterest.") {
+        "[pinterest]"
+    } else if meta.webpage_url.contains("bilibili.com") {
+        "[bilibili]"
     } else if meta.webpage_url.contains("youtube.com") || meta.webpage_url.contains("youtu.be") {
         "[youtube]"
     } else {

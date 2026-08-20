@@ -1,13 +1,16 @@
 use crate::core::error::{DlpError, Result};
+use crate::extractor::bilibili::BilibiliExtractor;
 use crate::extractor::dailymotion::DailymotionExtractor;
 use crate::extractor::facebook::FacebookExtractor;
 use crate::extractor::generic::GenericExtractor;
 use crate::extractor::instagram::InstagramExtractor;
 use crate::extractor::linkedin::LinkedInExtractor;
+use crate::extractor::pinterest::PinterestExtractor;
 use crate::extractor::reddit::RedditExtractor;
 use crate::extractor::soundcloud::SoundCloudExtractor;
 use crate::extractor::tiktok::TikTokExtractor;
 use crate::extractor::traits::Extractor;
+use crate::extractor::twitch::TwitchExtractor;
 use crate::extractor::twitter::TwitterExtractor;
 use crate::extractor::vimeo::VimeoExtractor;
 use crate::extractor::youtube::YoutubeExtractor;
@@ -25,13 +28,16 @@ impl ExtractorRegistry {
             Arc::new(YoutubeExtractor::with_http_client(http.clone())),
             Arc::new(FacebookExtractor::with_http_client(http.clone())),
             Arc::new(TwitterExtractor::with_http_client(http.clone())),
-            Arc::new(DailymotionExtractor::with_http_client(http.clone())),
+            Arc::new(InstagramExtractor::with_http_client(http.clone())),
             Arc::new(LinkedInExtractor::with_http_client(http.clone())),
             Arc::new(TikTokExtractor::with_http_client(http.clone())),
-            Arc::new(InstagramExtractor::with_http_client(http.clone())),
             Arc::new(RedditExtractor::with_http_client(http.clone())),
             Arc::new(VimeoExtractor::with_http_client(http.clone())),
             Arc::new(SoundCloudExtractor::with_http_client(http.clone())),
+            Arc::new(DailymotionExtractor::with_http_client(http.clone())),
+            Arc::new(TwitchExtractor::with_http_client(http.clone())),
+            Arc::new(PinterestExtractor::with_http_client(http.clone())),
+            Arc::new(BilibiliExtractor::with_http_client(http.clone())),
         ];
 
         let generic_extractor: Arc<dyn Extractor> =
