@@ -1,5 +1,6 @@
 use crate::core::types::{FormatId, MediaType, Protocol, Resolution};
 use crate::models::format::StreamFormat;
+use regex::Regex;
 use serde_json::Value;
 
 #[derive(Debug, Default)]
@@ -18,11 +19,20 @@ impl TwitterParser {
     pub fn parse_vxtwitter_json(val: &Value, tweet_id: &str) -> TwitterParsedData {
         let mut data = TwitterParsedData::default();
 
-        data.title = val
-            .get("text")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        data.description = data.title.clone();
+        let raw_text = val.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        // Clean trailing t.co link
+        let clean_text = Regex::new(r"https://t\.co/\w+\s*$")
+            .unwrap()
+            .replace(raw_text, "")
+            .trim()
+            .to_string();
+
+        data.title = if clean_text.is_empty() {
+            Some(format!("Tweet #{}", tweet_id))
+        } else {
+            Some(clean_text.clone())
+        };
+        data.description = Some(clean_text);
         data.uploader = val
             .get("user_name")
             .or_else(|| val.get("user_screen_name"))
@@ -62,16 +72,18 @@ impl TwitterParser {
             for (idx, m) in media_list.iter().enumerate() {
                 if let Some(u) = m.get("url").and_then(|v| v.as_str())
                     && (m.get("type").and_then(|v| v.as_str()) == Some("video")
+                        || m.get("type").and_then(|v| v.as_str()) == Some("gif")
                         || u.contains(".mp4"))
                 {
+                    let width = m.get("width").and_then(|v| v.as_u64()).map(|w| w as u32);
+                    let height = m.get("height").and_then(|v| v.as_u64()).map(|h| h as u32);
+                    let itag = height.unwrap_or((idx + 1) as u32);
+
                     data.formats.push(StreamFormat {
-                        format_id: FormatId::new(format!("video-{}", idx + 1)),
+                        format_id: FormatId::new(format!("video-{}", itag)),
                         url: u.to_string(),
                         ext: "mp4".to_string(),
-                        resolution: Resolution {
-                            width: m.get("width").and_then(|v| v.as_u64()).map(|w| w as u32),
-                            height: m.get("height").and_then(|v| v.as_u64()).map(|h| h as u32),
-                        },
+                        resolution: Resolution { width, height },
                         fps: Some(30),
                         bitrate: Some(1_500_000),
                         filesize: None,
@@ -82,16 +94,12 @@ impl TwitterParser {
                         acodec: Some("aac".to_string()),
                         audio_sample_rate: Some(44100),
                         audio_channels: Some(2),
-                        itag: (idx + 1) as u32,
-                        quality_label: Some(format!("Quality {}", idx + 1)),
+                        itag,
+                        quality_label: height.map(|h| format!("{}p", h)),
                         source_client: "twitter_media".to_string(),
                     });
                 }
             }
-        }
-
-        if data.title.is_none() {
-            data.title = Some(format!("Tweet #{}", tweet_id));
         }
 
         data

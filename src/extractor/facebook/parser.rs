@@ -1,5 +1,6 @@
 use crate::core::types::{FormatId, MediaType, Protocol, Resolution};
 use crate::models::format::StreamFormat;
+use crate::models::subtitle::SubtitleTrack;
 use regex::Regex;
 use serde_json::Value;
 use std::sync::LazyLock;
@@ -21,6 +22,7 @@ pub struct FacebookParsedData {
     pub duration: Option<u64>,
     pub thumbnails: Vec<String>,
     pub formats: Vec<StreamFormat>,
+    pub subtitles: Vec<SubtitleTrack>,
 }
 
 pub struct FacebookParser;
@@ -53,7 +55,7 @@ impl FacebookParser {
                     Some(parts[1].trim().to_string()),
                 )
             } else {
-                (Some(t), None)
+                (Some(t.replace(" | Facebook", "").trim().to_string()), None)
             }
         } else {
             (Some(format!("Facebook video #{}", video_id)), None)
@@ -64,6 +66,7 @@ impl FacebookParser {
         let mut found_dash_manifests = Vec::new();
         let mut hd_urls = Vec::new();
         let mut sd_urls = Vec::new();
+        let mut subtitles = Vec::new();
 
         for cap in script_re.captures_iter(html) {
             let script_content = cap.get(1).map(|m| m.as_str().trim()).unwrap_or("");
@@ -71,7 +74,13 @@ impl FacebookParser {
                 && script_content.ends_with('}')
                 && let Ok(val) = serde_json::from_str::<Value>(script_content)
             {
-                Self::walk_json_tree(&val, &mut found_dash_manifests, &mut hd_urls, &mut sd_urls);
+                Self::walk_json_tree(
+                    &val,
+                    &mut found_dash_manifests,
+                    &mut hd_urls,
+                    &mut sd_urls,
+                    &mut subtitles,
+                );
             }
         }
 
@@ -152,6 +161,7 @@ impl FacebookParser {
             duration: None,
             thumbnails,
             formats,
+            subtitles,
         }
     }
 
@@ -160,6 +170,7 @@ impl FacebookParser {
         dash_manifests: &mut Vec<String>,
         hd_urls: &mut Vec<String>,
         sd_urls: &mut Vec<String>,
+        subtitles: &mut Vec<SubtitleTrack>,
     ) {
         match val {
             Value::Object(map) => {
@@ -187,14 +198,24 @@ impl FacebookParser {
                         && !sd_urls.contains(&url_str.to_string())
                     {
                         sd_urls.push(url_str.to_string());
+                    } else if matches!(k.as_str(), "captions_url" | "subtitles_url" | "caption_url")
+                        && let Some(sub_url) = v.as_str()
+                        && sub_url.starts_with("http")
+                    {
+                        subtitles.push(SubtitleTrack {
+                            language_code: "en".to_string(),
+                            name: "English".to_string(),
+                            base_url: sub_url.to_string(),
+                            is_auto_generated: false,
+                        });
                     } else {
-                        Self::walk_json_tree(v, dash_manifests, hd_urls, sd_urls);
+                        Self::walk_json_tree(v, dash_manifests, hd_urls, sd_urls, subtitles);
                     }
                 }
             }
             Value::Array(arr) => {
                 for item in arr {
-                    Self::walk_json_tree(item, dash_manifests, hd_urls, sd_urls);
+                    Self::walk_json_tree(item, dash_manifests, hd_urls, sd_urls, subtitles);
                 }
             }
             _ => {}

@@ -155,7 +155,35 @@ impl InstagramParser {
             data.description = Some(caption.to_string());
         }
 
-        if let Some(video_url) = item.get("video_url").and_then(|v| v.as_str()) {
+        if let Some(versions) = item.get("video_versions").and_then(|v| v.as_array()) {
+            for (idx, v) in versions.iter().enumerate() {
+                if let Some(u) = v.get("url").and_then(|v| v.as_str()) {
+                    let width = v.get("width").and_then(|v| v.as_u64()).map(|w| w as u32);
+                    let height = v.get("height").and_then(|v| v.as_u64()).map(|h| h as u32);
+                    let itag = height.unwrap_or((idx + 1) as u32);
+
+                    data.formats.push(StreamFormat {
+                        format_id: FormatId::new(format!("video-{}", itag)),
+                        url: u.to_string(),
+                        ext: "mp4".to_string(),
+                        resolution: Resolution { width, height },
+                        fps: Some(30),
+                        bitrate: Some(2_000_000),
+                        filesize: None,
+                        filesize_approx: None,
+                        media_type: MediaType::Combined,
+                        protocol: Protocol::Https,
+                        vcodec: Some("h264".to_string()),
+                        acodec: Some("aac".to_string()),
+                        audio_sample_rate: Some(44100),
+                        audio_channels: Some(2),
+                        itag,
+                        quality_label: height.map(|h| format!("{}p", h)),
+                        source_client: "instagram_versions".to_string(),
+                    });
+                }
+            }
+        } else if let Some(video_url) = item.get("video_url").and_then(|v| v.as_str()) {
             data.formats.push(StreamFormat {
                 format_id: FormatId::new("hd"),
                 url: video_url.to_string(),

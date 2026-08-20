@@ -103,7 +103,7 @@ impl FacebookExtractor {
             upload_date: None,
             thumbnails: parsed.thumbnails,
             formats,
-            subtitles: Vec::new(),
+            subtitles: parsed.subtitles,
             webpage_url: watch_url,
             is_live: false,
         })
@@ -121,7 +121,15 @@ impl Extractor for FacebookExtractor {
     }
 
     async fn extract(&self, url: &str) -> Result<VideoMetadata> {
-        let video_id = extract_facebook_video_id(url)?;
+        let video_id = match extract_facebook_video_id(url) {
+            Ok(id) => id,
+            Err(_) => {
+                // Try resolving short redirect e.g. fb.watch
+                let res = self.http.get(url).send().await?;
+                let final_url = res.url().to_string();
+                extract_facebook_video_id(&final_url)?
+            }
+        };
         self.extract_by_id(&video_id).await
     }
 }

@@ -44,10 +44,13 @@ impl Extractor for TwitterExtractor {
 
     async fn extract(&self, url: &str) -> Result<VideoMetadata> {
         let video_id = extract_twitter_video_id(url)?;
-        let api_url = format!(
-            "https://api.vxtwitter.com/Twitter/status/{}",
-            video_id.as_str()
-        );
+        let endpoints = [
+            format!(
+                "https://api.vxtwitter.com/Twitter/status/{}",
+                video_id.as_str()
+            ),
+            format!("https://api.fxtwitter.com/status/{}", video_id.as_str()),
+        ];
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -58,45 +61,47 @@ impl Extractor for TwitterExtractor {
         );
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
 
-        let response = self.http.get(&api_url).headers(headers).send().await?;
-        if !response.status().is_success() {
-            return Err(DlpError::ExtractionError(format!(
-                "Twitter API request failed with HTTP {}",
-                response.status()
-            )));
+        for api_url in endpoints {
+            if let Ok(response) = self
+                .http
+                .get(&api_url)
+                .headers(headers.clone())
+                .send()
+                .await
+                && response.status().is_success()
+                && let Ok(json_val) = response.json::<Value>().await
+            {
+                let parsed = TwitterParser::parse_vxtwitter_json(&json_val, video_id.as_str());
+                if !parsed.formats.is_empty() {
+                    let title = parsed
+                        .title
+                        .unwrap_or_else(|| format!("Tweet #{}", video_id));
+                    let uploader = parsed
+                        .uploader
+                        .unwrap_or_else(|| "Twitter User".to_string());
+
+                    return Ok(VideoMetadata {
+                        id: video_id,
+                        title,
+                        uploader,
+                        channel_id: None,
+                        duration: parsed.duration,
+                        view_count: None,
+                        description: parsed.description,
+                        upload_date: None,
+                        thumbnails: parsed.thumbnails,
+                        formats: parsed.formats,
+                        subtitles: Vec::new(),
+                        webpage_url: url.to_string(),
+                        is_live: false,
+                    });
+                }
+            }
         }
 
-        let json_val: Value = response.json().await?;
-        let parsed = TwitterParser::parse_vxtwitter_json(&json_val, video_id.as_str());
-
-        if parsed.formats.is_empty() {
-            return Err(DlpError::VideoUnavailable(format!(
-                "No downloadable video streams found in Tweet ID: {}",
-                video_id
-            )));
-        }
-
-        let title = parsed
-            .title
-            .unwrap_or_else(|| format!("Tweet #{}", video_id));
-        let uploader = parsed
-            .uploader
-            .unwrap_or_else(|| "Twitter User".to_string());
-
-        Ok(VideoMetadata {
-            id: video_id,
-            title,
-            uploader,
-            channel_id: None,
-            duration: parsed.duration,
-            view_count: None,
-            description: parsed.description,
-            upload_date: None,
-            thumbnails: parsed.thumbnails,
-            formats: parsed.formats,
-            subtitles: Vec::new(),
-            webpage_url: url.to_string(),
-            is_live: false,
-        })
+        Err(DlpError::VideoUnavailable(format!(
+            "No downloadable video streams found in Tweet ID: {}",
+            video_id
+        )))
     }
 }
