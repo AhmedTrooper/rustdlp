@@ -11,8 +11,18 @@ pub use core::types::{FormatId, MediaType, Protocol, Resolution, VideoId};
 pub use downloader::{
     AdaptiveDownloader, HlsDownloader, HttpDownloader, SingleStreamDownloader, StreamDownloader,
 };
+pub use extractor::dailymotion::DailymotionExtractor;
 pub use extractor::facebook::FacebookExtractor;
+pub use extractor::generic::GenericExtractor;
+pub use extractor::instagram::InstagramExtractor;
+pub use extractor::linkedin::LinkedInExtractor;
+pub use extractor::reddit::RedditExtractor;
+pub use extractor::registry::ExtractorRegistry;
+pub use extractor::soundcloud::SoundCloudExtractor;
+pub use extractor::tiktok::TikTokExtractor;
 pub use extractor::traits::Extractor;
+pub use extractor::twitter::TwitterExtractor;
+pub use extractor::vimeo::VimeoExtractor;
 pub use extractor::youtube::{SubtitleDownloader, YoutubeExtractor, YoutubePlaylistExtractor};
 pub use models::format::StreamFormat;
 pub use models::playlist::{PlaylistItem, PlaylistMetadata};

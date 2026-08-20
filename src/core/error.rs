@@ -7,6 +7,9 @@ pub enum DlpError {
     #[error("Invalid URL or video ID: {0}")]
     InvalidUrl(String),
 
+    #[error("Unsupported URL: {0}")]
+    UnsupportedUrl(String),
+
     #[error("Extraction failed: {0}")]
     ExtractionError(String),
 
@@ -40,6 +43,6 @@ pub enum DlpError {
     #[error("FFmpeg not found or failed: {0}")]
     FFmpegError(String),
 
-    #[error("{0}")]
-    Custom(String),
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
 }

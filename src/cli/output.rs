@@ -3,12 +3,31 @@ use crate::models::video::VideoMetadata;
 use colored::*;
 
 pub fn print_video_info(meta: &VideoMetadata) {
-    let site_tag =
-        if meta.webpage_url.contains("facebook.com") || meta.webpage_url.contains("fb.watch") {
-            "[facebook]"
-        } else {
-            "[youtube]"
-        };
+    let site_tag = if meta.webpage_url.contains("facebook.com")
+        || meta.webpage_url.contains("fb.watch")
+    {
+        "[facebook]"
+    } else if meta.webpage_url.contains("twitter.com") || meta.webpage_url.contains("x.com") {
+        "[twitter]"
+    } else if meta.webpage_url.contains("dailymotion.com") || meta.webpage_url.contains("dai.ly") {
+        "[dailymotion]"
+    } else if meta.webpage_url.contains("linkedin.com") {
+        "[linkedin]"
+    } else if meta.webpage_url.contains("tiktok.com") || meta.webpage_url.contains("douyin.com") {
+        "[tiktok]"
+    } else if meta.webpage_url.contains("instagram.com") {
+        "[instagram]"
+    } else if meta.webpage_url.contains("reddit.com") || meta.webpage_url.contains("redd.it") {
+        "[reddit]"
+    } else if meta.webpage_url.contains("vimeo.com") {
+        "[vimeo]"
+    } else if meta.webpage_url.contains("soundcloud.com") {
+        "[soundcloud]"
+    } else if meta.webpage_url.contains("youtube.com") || meta.webpage_url.contains("youtu.be") {
+        "[youtube]"
+    } else {
+        "[generic]"
+    };
 
     println!(
         "{} [{}] {}: {}",
@@ -77,7 +96,7 @@ pub fn print_format_table(meta: &VideoMetadata) {
     );
 
     println!(
-        "{:<5} {:<5} {:<12} {:<4} {:<2} │ {:>10} {:>7} {:<5} │ {:<18} {:<15} {}",
+        "{:<15} {:<5} {:<12} {:<4} {:<2} │ {:>10} {:>7} {:<5} │ {:<18} {:<15} {}",
         "ID".bold(),
         "EXT".bold(),
         "RESOLUTION".bold(),
@@ -90,7 +109,7 @@ pub fn print_format_table(meta: &VideoMetadata) {
         "ACODEC".bold(),
         "MORE INFO".bold(),
     );
-    println!("{}", "─".repeat(105).dimmed());
+    println!("{}", "─".repeat(115).dimmed());
 
     for f in &meta.formats {
         let id_str = f.format_id.to_string();
@@ -138,7 +157,7 @@ pub fn print_format_table(meta: &VideoMetadata) {
         let info_str = more_info.join(", ");
 
         println!(
-            "{:<5} {:<5} {:<12} {:<4} {:<2} │ {:>10} {:>7} {:<5} │ {:<18} {:<15} {}",
+            "{:<15} {:<5} {:<12} {:<4} {:<2} │ {:>10} {:>7} {:<5} │ {:<18} {:<15} {}",
             id_str.yellow(),
             ext_str.green(),
             res_str,

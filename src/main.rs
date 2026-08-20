@@ -5,12 +5,9 @@ use rustdlp::core::config::DlpConfig;
 use rustdlp::core::error::Result;
 use rustdlp::core::utils::resolve_output_path;
 use rustdlp::downloader::{AdaptiveDownloader, SingleStreamDownloader, StreamDownloader};
-use rustdlp::extractor::facebook::is_facebook_url;
 use rustdlp::extractor::youtube::subtitle::SubtitleDownloader;
 use rustdlp::extractor::youtube::url::extract_playlist_id;
-use rustdlp::extractor::{
-    Extractor, FacebookExtractor, YoutubeExtractor, YoutubePlaylistExtractor,
-};
+use rustdlp::extractor::{ExtractorRegistry, YoutubeExtractor, YoutubePlaylistExtractor};
 use rustdlp::models::{FormatSelector, SelectedFormat, VideoMetadata};
 use rustdlp::postprocessor::{FFmpeg, MetadataWriter};
 use std::path::PathBuf;
@@ -26,20 +23,7 @@ async fn main() -> Result<()> {
 
     let http_client = config.build_http_client()?;
 
-    // 2. Facebook Extractor Routing
-    if is_facebook_url(&args.url) {
-        let extractor = FacebookExtractor::with_http_client(http_client.clone());
-        let metadata = match extractor.extract(&args.url).await {
-            Ok(meta) => meta,
-            Err(err) => {
-                eprintln!("{} {}", "ERROR:".red().bold(), err);
-                std::process::exit(1);
-            }
-        };
-        return process_single_video(&args, &metadata, &http_client).await;
-    }
-
-    // 3. YouTube Playlist Routing
+    // 2. YouTube Playlist Routing
     let playlist_id = extract_playlist_id(&args.url);
     let is_playlist_request = playlist_id.is_some() && (args.yes_playlist || !args.no_playlist);
 
@@ -49,14 +33,9 @@ async fn main() -> Result<()> {
         return process_playlist(&args, pl_id, &http_client).await;
     }
 
-    // 4. YouTube Single Video Routing
-    let extractor = YoutubeExtractor::with_http_client(http_client.clone());
-    let metadata = match extractor
-        .extract_by_id(&rustdlp::extractor::youtube::url::extract_video_id(
-            &args.url,
-        )?)
-        .await
-    {
+    // 3. Automated Multi-Site Extractor Dispatch via Registry
+    let registry = ExtractorRegistry::new(http_client.clone());
+    let metadata = match registry.extract(&args.url).await {
         Ok(meta) => meta,
         Err(err) => {
             eprintln!("{} {}", "ERROR:".red().bold(), err);

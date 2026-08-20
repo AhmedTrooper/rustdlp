@@ -1,7 +1,27 @@
+pub mod dailymotion;
 pub mod facebook;
+pub mod generic;
+pub mod instagram;
+pub mod linkedin;
+pub mod reddit;
+pub mod registry;
+pub mod soundcloud;
+pub mod tiktok;
 pub mod traits;
+pub mod twitter;
+pub mod vimeo;
 pub mod youtube;
 
+pub use dailymotion::DailymotionExtractor;
 pub use facebook::FacebookExtractor;
+pub use generic::GenericExtractor;
+pub use instagram::InstagramExtractor;
+pub use linkedin::LinkedInExtractor;
+pub use reddit::RedditExtractor;
+pub use registry::ExtractorRegistry;
+pub use soundcloud::SoundCloudExtractor;
+pub use tiktok::TikTokExtractor;
 pub use traits::Extractor;
+pub use twitter::TwitterExtractor;
+pub use vimeo::VimeoExtractor;
 pub use youtube::{SubtitleDownloader, YoutubeExtractor, YoutubePlaylistExtractor};
