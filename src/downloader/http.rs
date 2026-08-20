@@ -12,6 +12,12 @@ pub struct HttpDownloader {
     http: reqwest::Client,
 }
 
+impl Default for HttpDownloader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HttpDownloader {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
@@ -32,15 +38,16 @@ impl HttpDownloader {
         let part_path = Self::get_part_path(dest_path);
 
         // Check if destination already exists and is complete
-        if dest_path.exists() {
-            if let Ok(meta) = std::fs::metadata(dest_path) {
-                if let Some(expected) = expected_size {
-                    if meta.len() == expected {
-                        println!("[download] {} already fully downloaded", dest_path.display());
-                        return Ok(());
-                    }
-                }
-            }
+        if dest_path.exists()
+            && let Ok(meta) = std::fs::metadata(dest_path)
+            && let Some(expected) = expected_size
+            && meta.len() == expected
+        {
+            println!(
+                "[download] {} already fully downloaded",
+                dest_path.display()
+            );
+            return Ok(());
         }
 
         let mut total_size = expected_size;
@@ -51,15 +58,21 @@ impl HttpDownloader {
         // If total size unknown, probe with a small range request
         if total_size.is_none() {
             let mut probe_headers = HeaderMap::new();
-            probe_headers.insert(USER_AGENT, HeaderValue::from_str(ua).unwrap_or(HeaderValue::from_static("Mozilla/5.0")));
+            probe_headers.insert(
+                USER_AGENT,
+                HeaderValue::from_str(ua).unwrap_or(HeaderValue::from_static("Mozilla/5.0")),
+            );
             probe_headers.insert(RANGE, HeaderValue::from_static("bytes=0-1"));
 
-            if let Ok(probe_resp) = self.http.get(url).headers(probe_headers).send().await {
-                if let Some(content_range) = probe_resp.headers().get("content-range").and_then(|v| v.to_str().ok()) {
-                    // Content-Range: bytes 0-1/1234567
-                    if let Some((_, total_str)) = content_range.split_once('/') {
-                        total_size = total_str.parse::<u64>().ok();
-                    }
+            if let Ok(probe_resp) = self.http.get(url).headers(probe_headers).send().await
+                && let Some(content_range) = probe_resp
+                    .headers()
+                    .get("content-range")
+                    .and_then(|v| v.to_str().ok())
+            {
+                // Content-Range: bytes 0-1/1234567
+                if let Some((_, total_str)) = content_range.split_once('/') {
+                    total_size = total_str.parse::<u64>().ok();
                 }
             }
         }
@@ -99,14 +112,24 @@ impl HttpDownloader {
                 let range_header = format!("bytes={}-{}", curr_offset, chunk_end);
 
                 let mut headers = HeaderMap::new();
-                headers.insert(USER_AGENT, HeaderValue::from_str(ua).unwrap_or(HeaderValue::from_static("Mozilla/5.0")));
-                headers.insert(RANGE, HeaderValue::from_str(&range_header).map_err(|e| DlpError::DownloadError(e.to_string()))?);
+                headers.insert(
+                    USER_AGENT,
+                    HeaderValue::from_str(ua).unwrap_or(HeaderValue::from_static("Mozilla/5.0")),
+                );
+                headers.insert(
+                    RANGE,
+                    HeaderValue::from_str(&range_header)
+                        .map_err(|e| DlpError::DownloadError(e.to_string()))?,
+                );
 
                 let response = self.http.get(url).headers(headers).send().await?;
                 let status = response.status();
 
                 if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
-                    return Err(DlpError::DownloadError(format!("Chunk download failed with status {}", status)));
+                    return Err(DlpError::DownloadError(format!(
+                        "Chunk download failed with status {}",
+                        status
+                    )));
                 }
 
                 let mut stream = response.bytes_stream();
@@ -121,9 +144,16 @@ impl HttpDownloader {
         } else {
             // Streaming mode if total size cannot be determined
             let mut headers = HeaderMap::new();
-            headers.insert(USER_AGENT, HeaderValue::from_str(ua).unwrap_or(HeaderValue::from_static("Mozilla/5.0")));
+            headers.insert(
+                USER_AGENT,
+                HeaderValue::from_str(ua).unwrap_or(HeaderValue::from_static("Mozilla/5.0")),
+            );
             if downloaded_bytes > 0 {
-                headers.insert(RANGE, HeaderValue::from_str(&format!("bytes={}-", downloaded_bytes)).map_err(|e| DlpError::DownloadError(e.to_string()))?);
+                headers.insert(
+                    RANGE,
+                    HeaderValue::from_str(&format!("bytes={}-", downloaded_bytes))
+                        .map_err(|e| DlpError::DownloadError(e.to_string()))?,
+                );
             }
 
             let response = self.http.get(url).headers(headers).send().await?;
@@ -148,7 +178,11 @@ impl HttpDownloader {
 
     fn get_part_path(path: &Path) -> PathBuf {
         let mut part = path.to_path_buf();
-        let filename = part.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let filename = part
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         part.set_file_name(format!("{}.part", filename));
         part
     }

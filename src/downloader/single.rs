@@ -9,6 +9,12 @@ pub struct SingleStreamDownloader {
     http: HttpDownloader,
 }
 
+impl Default for SingleStreamDownloader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SingleStreamDownloader {
     pub fn new() -> Self {
         Self {

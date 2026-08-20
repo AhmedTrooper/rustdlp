@@ -12,9 +12,7 @@ impl DownloadProgressBar {
             let pb = ProgressBar::new(total);
             pb.set_style(
                 ProgressStyle::default_bar()
-                    .template(&format!(
-                        "{{prefix:.bold}} [download] {{percent:>3}}% of {{total_bytes}} at {{binary_bytes_per_sec}} ETA {{eta}}"
-                    ))
+                    .template("{prefix:.bold} [download] {percent:>3}% of {total_bytes} at {binary_bytes_per_sec} ETA {eta}")
                     .unwrap_or_else(|_| ProgressStyle::default_bar())
                     .progress_chars("━╸─"),
             );
@@ -23,7 +21,7 @@ impl DownloadProgressBar {
             let pb = ProgressBar::new_spinner();
             pb.set_style(
                 ProgressStyle::default_spinner()
-                    .template(&format!("{{prefix:.bold}} [download] {{bytes}} at {{binary_bytes_per_sec}}"))
+                    .template("{prefix:.bold} [download] {bytes} at {binary_bytes_per_sec}")
                     .unwrap_or_else(|_| ProgressStyle::default_spinner()),
             );
             pb

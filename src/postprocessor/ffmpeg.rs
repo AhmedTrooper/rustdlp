@@ -88,16 +88,10 @@ impl FFmpeg {
             ));
         }
 
-        println!(
-            "[ExtractAudio] Destination: {}",
-            output_path.display()
-        );
+        println!("[ExtractAudio] Destination: {}", output_path.display());
 
         let mut cmd = Command::new("ffmpeg");
-        cmd.arg("-y")
-            .arg("-i")
-            .arg(input_path)
-            .arg("-vn");
+        cmd.arg("-y").arg("-i").arg(input_path).arg("-vn");
 
         match audio_format {
             "mp3" => {
@@ -146,9 +140,16 @@ impl FFmpeg {
             return Ok(());
         }
 
-        println!("[EmbedSubtitle] Embedding {} subtitles into {}", lang, output_path.display());
+        println!(
+            "[EmbedSubtitle] Embedding {} subtitles into {}",
+            lang,
+            output_path.display()
+        );
 
-        let ext = output_path.extension().and_then(|s| s.to_str()).unwrap_or("mp4");
+        let ext = output_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("mp4");
         let mut cmd = Command::new("ffmpeg");
         cmd.arg("-y")
             .arg("-i")
@@ -188,9 +189,15 @@ impl FFmpeg {
             return Ok(());
         }
 
-        println!("[EmbedThumbnail] Embedding thumbnail into {}", output_path.display());
+        println!(
+            "[EmbedThumbnail] Embedding thumbnail into {}",
+            output_path.display()
+        );
 
-        let ext = output_path.extension().and_then(|s| s.to_str()).unwrap_or("mp4");
+        let ext = output_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("mp4");
         let mut cmd = Command::new("ffmpeg");
         cmd.arg("-y")
             .arg("-i")

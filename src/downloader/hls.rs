@@ -47,11 +47,12 @@ impl HlsDownloader {
         let mut target_playlist_url = manifest_url.to_string();
         for line in manifest_text.lines() {
             let line = line.trim();
-            if !line.starts_with('#') && !line.is_empty() {
-                if let Ok(resolved) = base_url.join(line) {
-                    target_playlist_url = resolved.to_string();
-                    break;
-                }
+            if !line.starts_with('#')
+                && !line.is_empty()
+                && let Ok(resolved) = base_url.join(line)
+            {
+                target_playlist_url = resolved.to_string();
+                break;
             }
         }
 
@@ -74,15 +75,18 @@ impl HlsDownloader {
         let mut segment_urls = Vec::new();
         for line in media_playlist_text.lines() {
             let line = line.trim();
-            if !line.starts_with('#') && !line.is_empty() {
-                if let Ok(resolved) = media_base_url.join(line) {
-                    segment_urls.push(resolved.to_string());
-                }
+            if !line.starts_with('#')
+                && !line.is_empty()
+                && let Ok(resolved) = media_base_url.join(line)
+            {
+                segment_urls.push(resolved.to_string());
             }
         }
 
         if segment_urls.is_empty() {
-            return Err(DlpError::DownloadError("No segments found in HLS playlist".into()));
+            return Err(DlpError::DownloadError(
+                "No segments found in HLS playlist".into(),
+            ));
         }
 
         let total_segments = segment_urls.len() as u64;
@@ -123,7 +127,11 @@ impl HlsDownloader {
 
     fn get_temp_ts_path(path: &Path) -> PathBuf {
         let mut p = path.to_path_buf();
-        let fname = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let fname = p
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         p.set_file_name(format!("{}.ts.part", fname));
         p
     }

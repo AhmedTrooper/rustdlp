@@ -8,6 +8,12 @@ pub struct AdaptiveDownloader {
     http: HttpDownloader,
 }
 
+impl Default for AdaptiveDownloader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AdaptiveDownloader {
     pub fn new() -> Self {
         Self {
@@ -23,12 +29,24 @@ impl AdaptiveDownloader {
         keep_fragments: bool,
     ) -> Result<()> {
         let parent = output_path.parent().unwrap_or_else(|| Path::new("."));
-        let stem = output_path.file_stem().unwrap_or_default().to_string_lossy();
+        let stem = output_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy();
 
-        let video_temp = parent.join(format!("{}.f{}.{}", stem, video_format.itag, video_format.ext));
-        let audio_temp = parent.join(format!("{}.f{}.{}", stem, audio_format.itag, audio_format.ext));
+        let video_temp = parent.join(format!(
+            "{}.f{}.{}",
+            stem, video_format.itag, video_format.ext
+        ));
+        let audio_temp = parent.join(format!(
+            "{}.f{}.{}",
+            stem, audio_format.itag, audio_format.ext
+        ));
 
-        println!("[download] Downloading 2 streams (video itag {}, audio itag {})", video_format.itag, audio_format.itag);
+        println!(
+            "[download] Downloading 2 streams (video itag {}, audio itag {})",
+            video_format.itag, audio_format.itag
+        );
 
         let v_prefix = format!("[download] itag {:<3}", video_format.itag);
         let a_prefix = format!("[download] itag {:<3}", audio_format.itag);
