@@ -1,7 +1,7 @@
 use crate::core::error::{DlpError, Result};
 use crate::core::types::VideoId;
 use crate::models::innertube::InnertubePlayerResponse;
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, ORIGIN, USER_AGENT};
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue, ORIGIN, USER_AGENT};
 use serde_json::json;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +165,12 @@ impl InnertubeClientType {
 
 pub struct InnertubeClient {
     http: reqwest::Client,
+}
+
+impl Default for InnertubeClient {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl InnertubeClient {

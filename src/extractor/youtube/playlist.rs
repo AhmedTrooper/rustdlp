@@ -1,8 +1,8 @@
 use crate::core::error::{DlpError, Result};
 use crate::core::types::VideoId;
 use crate::models::playlist::{PlaylistItem, PlaylistMetadata};
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, ORIGIN, USER_AGENT};
-use serde_json::{json, Value};
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue, ORIGIN, USER_AGENT};
+use serde_json::{Value, json};
 use std::collections::HashSet;
 
 pub struct YoutubePlaylistExtractor {
@@ -44,7 +44,10 @@ impl YoutubePlaylistExtractor {
             ),
         );
         headers.insert("X-YouTube-Client-Name", HeaderValue::from_static("1"));
-        headers.insert("X-YouTube-Client-Version", HeaderValue::from_static("2.20260708.00.00"));
+        headers.insert(
+            "X-YouTube-Client-Version",
+            HeaderValue::from_static("2.20260708.00.00"),
+        );
         headers.insert(ORIGIN, HeaderValue::from_static("https://www.youtube.com"));
 
         let response = self
@@ -67,7 +70,11 @@ impl YoutubePlaylistExtractor {
         let title = json_val
             .pointer("/metadata/playlistMetadataRenderer/title")
             .and_then(|v| v.as_str())
-            .or_else(|| json_val.pointer("/header/playlistHeaderRenderer/title/simpleText").and_then(|v| v.as_str()))
+            .or_else(|| {
+                json_val
+                    .pointer("/header/playlistHeaderRenderer/title/simpleText")
+                    .and_then(|v| v.as_str())
+            })
             .unwrap_or("Unknown Playlist")
             .to_string();
 
@@ -100,28 +107,33 @@ impl YoutubePlaylistExtractor {
     ) {
         match val {
             Value::Object(map) => {
-                if let Some(vid_val) = map.get("videoId").and_then(|v| v.as_str()) {
-                    if vid_val.len() == 11 && !seen_ids.contains(vid_val) {
-                        seen_ids.insert(vid_val.to_string());
+                if let Some(vid_val) = map.get("videoId").and_then(|v| v.as_str())
+                    && vid_val.len() == 11
+                    && !seen_ids.contains(vid_val)
+                {
+                    seen_ids.insert(vid_val.to_string());
 
-                        let title = map.get("title").and_then(|t| {
+                    let title = map
+                        .get("title")
+                        .and_then(|t| {
                             t.get("simpleText")
                                 .and_then(|s| s.as_str())
                                 .or_else(|| t.pointer("/runs/0/text").and_then(|s| s.as_str()))
-                        }).map(|s| s.to_string());
+                        })
+                        .map(|s| s.to_string());
 
-                        let duration = map.get("lengthSeconds")
-                            .and_then(|s| s.as_str())
-                            .and_then(|s| s.parse::<u64>().ok());
+                    let duration = map
+                        .get("lengthSeconds")
+                        .and_then(|s| s.as_str())
+                        .and_then(|s| s.parse::<u64>().ok());
 
-                        items.push(PlaylistItem {
-                            id: VideoId::new(vid_val),
-                            title,
-                            uploader: None,
-                            duration,
-                            thumbnail: None,
-                        });
-                    }
+                    items.push(PlaylistItem {
+                        id: VideoId::new(vid_val),
+                        title,
+                        uploader: None,
+                        duration,
+                        thumbnail: None,
+                    });
                 }
 
                 for v in map.values() {

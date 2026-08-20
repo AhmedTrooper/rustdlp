@@ -5,14 +5,13 @@ use crate::models::innertube::RawFormatStream;
 use regex::Regex;
 use std::sync::LazyLock;
 
-static MIME_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"^([^/]+)/([^;]+)(?:;\s*codecs="([^"]+)")?"#).unwrap()
-});
+static MIME_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^([^/]+)/([^;]+)(?:;\s*codecs="([^"]+)")?"#).unwrap());
 
 pub fn parse_stream_format(raw: &RawFormatStream, client_name: &str) -> Option<StreamFormat> {
     let raw_url = if let Some(ref u) = raw.url {
         Some(u.clone())
-    } else if let Some(ref cipher) = raw.signature_cipher.as_ref().or(raw.cipher.as_ref()) {
+    } else if let Some(cipher) = raw.signature_cipher.as_ref().or(raw.cipher.as_ref()) {
         CipherHelper::parse_signature_cipher(cipher).ok()
     } else {
         None
@@ -43,7 +42,9 @@ pub fn parse_stream_format(raw: &RawFormatStream, client_name: &str) -> Option<S
     };
 
     let width = raw.width;
-    let height = raw.height.or_else(|| parse_height_from_quality_label(raw.quality_label.as_deref()));
+    let height = raw
+        .height
+        .or_else(|| parse_height_from_quality_label(raw.quality_label.as_deref()));
 
     let resolution = Resolution::new(width, height);
     let fps = raw.fps.filter(|&f| f > 1);
@@ -111,9 +112,17 @@ fn parse_mime_and_codecs(mime: &str) -> (String, Option<String>, Option<String>)
         if let Some(codecs_str) = raw_codecs {
             let codecs: Vec<&str> = codecs_str.split(',').map(|s| s.trim()).collect();
             for codec in codecs {
-                if codec.starts_with("avc") || codec.starts_with("vp") || codec.starts_with("av01") || codec.starts_with("hev") {
+                if codec.starts_with("avc")
+                    || codec.starts_with("vp")
+                    || codec.starts_with("av01")
+                    || codec.starts_with("hev")
+                {
                     vcodec = Some(codec.to_string());
-                } else if codec.starts_with("mp4a") || codec.starts_with("opus") || codec.starts_with("vorbis") || codec.starts_with("ac-3") {
+                } else if codec.starts_with("mp4a")
+                    || codec.starts_with("opus")
+                    || codec.starts_with("vorbis")
+                    || codec.starts_with("ac-3")
+                {
                     acodec = Some(codec.to_string());
                 }
             }
@@ -144,7 +153,8 @@ mod tests {
 
     #[test]
     fn test_parse_mime() {
-        let (container, vcodec, acodec) = parse_mime_and_codecs(r#"video/mp4; codecs="avc1.640028, mp4a.40.2""#);
+        let (container, vcodec, acodec) =
+            parse_mime_and_codecs(r#"video/mp4; codecs="avc1.640028, mp4a.40.2""#);
         assert_eq!(container, "mp4");
         assert_eq!(vcodec, Some("avc1.640028".into()));
         assert_eq!(acodec, Some("mp4a.40.2".into()));

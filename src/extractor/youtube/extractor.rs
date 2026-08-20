@@ -4,14 +4,20 @@ use crate::extractor::traits::Extractor;
 use crate::extractor::youtube::client::{InnertubeClient, InnertubeClientType};
 use crate::extractor::youtube::parser::parse_stream_format;
 use crate::extractor::youtube::url::extract_video_id;
-use crate::models::subtitle::SubtitleTrack;
 use crate::models::innertube::InnertubePlayerResponse;
+use crate::models::subtitle::SubtitleTrack;
 use crate::models::video::VideoMetadata;
 use async_trait::async_trait;
 use std::collections::HashSet;
 
 pub struct YoutubeExtractor {
     client: InnertubeClient,
+}
+
+impl Default for YoutubeExtractor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl YoutubeExtractor {
@@ -58,7 +64,12 @@ impl YoutubeExtractor {
                             .as_ref()
                             .and_then(|s| s.reason.as_deref())
                             .unwrap_or("Video unavailable");
-                        log::debug!("Client {} returned status {}: {}", client_type.name(), status, reason);
+                        log::debug!(
+                            "Client {} returned status {}: {}",
+                            client_type.name(),
+                            status,
+                            reason
+                        );
                     }
                 }
                 Err(e) => {
@@ -78,11 +89,23 @@ impl YoutubeExtractor {
             DlpError::ExtractionError("Missing videoDetails in player response".into())
         })?;
 
-        let title = details.title.clone().unwrap_or_else(|| "Unknown Title".into());
-        let uploader = details.author.clone().unwrap_or_else(|| "Unknown Uploader".into());
+        let title = details
+            .title
+            .clone()
+            .unwrap_or_else(|| "Unknown Title".into());
+        let uploader = details
+            .author
+            .clone()
+            .unwrap_or_else(|| "Unknown Uploader".into());
         let channel_id = details.channel_id.clone();
-        let duration = details.length_seconds.as_deref().and_then(|s| s.parse::<u64>().ok());
-        let view_count = details.view_count.as_deref().and_then(|s| s.parse::<u64>().ok());
+        let duration = details
+            .length_seconds
+            .as_deref()
+            .and_then(|s| s.parse::<u64>().ok());
+        let view_count = details
+            .view_count
+            .as_deref()
+            .and_then(|s| s.parse::<u64>().ok());
         let description = details.short_description.clone();
         let is_live = details.is_live_content.unwrap_or(false);
 
@@ -110,11 +133,11 @@ impl YoutubeExtractor {
                 // Progressive formats (combined video + audio)
                 if let Some(formats) = streaming_data.formats {
                     for raw in formats {
-                        if !seen_itags.contains(&raw.itag) {
-                            if let Some(stream_fmt) = parse_stream_format(&raw, client_name) {
-                                seen_itags.insert(raw.itag);
-                                all_formats.push(stream_fmt);
-                            }
+                        if !seen_itags.contains(&raw.itag)
+                            && let Some(stream_fmt) = parse_stream_format(&raw, client_name)
+                        {
+                            seen_itags.insert(raw.itag);
+                            all_formats.push(stream_fmt);
                         }
                     }
                 }
@@ -122,58 +145,59 @@ impl YoutubeExtractor {
                 // Adaptive formats (separate video and audio streams)
                 if let Some(adaptive) = streaming_data.adaptive_formats {
                     for raw in adaptive {
-                        if !seen_itags.contains(&raw.itag) {
-                            if let Some(stream_fmt) = parse_stream_format(&raw, client_name) {
-                                seen_itags.insert(raw.itag);
-                                all_formats.push(stream_fmt);
-                            }
+                        if !seen_itags.contains(&raw.itag)
+                            && let Some(stream_fmt) = parse_stream_format(&raw, client_name)
+                        {
+                            seen_itags.insert(raw.itag);
+                            all_formats.push(stream_fmt);
                         }
                     }
                 }
             }
 
             // Extract captions from whichever client returned them
-            if let Some(captions_container) = resp.captions {
-                if let Some(renderer) = captions_container.player_captions_tracklist_renderer {
-                    if let Some(tracks) = renderer.caption_tracks {
-                        for track in tracks {
-                            if !seen_subs.contains(&track.language_code) {
-                                seen_subs.insert(track.language_code.clone());
-                                let name = track
-                                    .name
-                                    .and_then(|n| n.simple_text.or_else(|| n.runs.and_then(|r| r.first().map(|tr| tr.text.clone()))))
-                                    .unwrap_or_else(|| track.language_code.clone());
-                                let is_auto = track.kind.as_deref() == Some("asr");
-                                subtitles.push(SubtitleTrack {
-                                    language_code: track.language_code,
-                                    name,
-                                    base_url: track.base_url,
-                                    is_auto_generated: is_auto,
-                                });
-                            }
-                        }
+            if let Some(captions_container) = resp.captions
+                && let Some(renderer) = captions_container.player_captions_tracklist_renderer
+                && let Some(tracks) = renderer.caption_tracks
+            {
+                for track in tracks {
+                    if !seen_subs.contains(&track.language_code) {
+                        seen_subs.insert(track.language_code.clone());
+                        let name = track
+                            .name
+                            .and_then(|n| {
+                                n.simple_text.or_else(|| {
+                                    n.runs.and_then(|r| r.first().map(|tr| tr.text.clone()))
+                                })
+                            })
+                            .unwrap_or_else(|| track.language_code.clone());
+                        let is_auto = track.kind.as_deref() == Some("asr");
+                        subtitles.push(SubtitleTrack {
+                            language_code: track.language_code,
+                            name,
+                            base_url: track.base_url,
+                            is_auto_generated: is_auto,
+                        });
                     }
                 }
             }
         }
 
         // Sort formats: audio first (by bitrate), then video (by resolution, fps, bitrate), then combined
-        all_formats.sort_by(|a, b| {
-            match (a.is_audio_only(), b.is_audio_only()) {
-                (true, true) => a.effective_bitrate().cmp(&b.effective_bitrate()),
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                (false, false) => {
-                    let res_cmp = a.height().cmp(&b.height());
-                    if res_cmp != std::cmp::Ordering::Equal {
-                        res_cmp
+        all_formats.sort_by(|a, b| match (a.is_audio_only(), b.is_audio_only()) {
+            (true, true) => a.effective_bitrate().cmp(&b.effective_bitrate()),
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            (false, false) => {
+                let res_cmp = a.height().cmp(&b.height());
+                if res_cmp != std::cmp::Ordering::Equal {
+                    res_cmp
+                } else {
+                    let fps_cmp = a.effective_fps().cmp(&b.effective_fps());
+                    if fps_cmp != std::cmp::Ordering::Equal {
+                        fps_cmp
                     } else {
-                        let fps_cmp = a.effective_fps().cmp(&b.effective_fps());
-                        if fps_cmp != std::cmp::Ordering::Equal {
-                            fps_cmp
-                        } else {
-                            a.effective_bitrate().cmp(&b.effective_bitrate())
-                        }
+                        a.effective_bitrate().cmp(&b.effective_bitrate())
                     }
                 }
             }
