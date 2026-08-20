@@ -3,16 +3,23 @@ use crate::models::video::VideoMetadata;
 use colored::*;
 
 pub fn print_video_info(meta: &VideoMetadata) {
+    let site_tag =
+        if meta.webpage_url.contains("facebook.com") || meta.webpage_url.contains("fb.watch") {
+            "[facebook]"
+        } else {
+            "[youtube]"
+        };
+
     println!(
         "{} [{}] {}: {}",
-        "[youtube]".green().bold(),
+        site_tag.green().bold(),
         meta.id.as_str().cyan(),
         "Extracting URL".bold(),
         meta.webpage_url
     );
     println!(
         "{} [{}] {}: {}",
-        "[youtube]".green().bold(),
+        site_tag.green().bold(),
         meta.id.as_str().cyan(),
         "Title".bold(),
         meta.title
@@ -20,7 +27,7 @@ pub fn print_video_info(meta: &VideoMetadata) {
     if let Some(dur) = meta.duration {
         println!(
             "{} [{}] {}: {} by {}",
-            "[youtube]".green().bold(),
+            site_tag.green().bold(),
             meta.id.as_str().cyan(),
             "Duration".bold(),
             format_duration(dur),
@@ -86,7 +93,7 @@ pub fn print_format_table(meta: &VideoMetadata) {
     println!("{}", "─".repeat(105).dimmed());
 
     for f in &meta.formats {
-        let id_str = f.itag.to_string();
+        let id_str = f.format_id.to_string();
         let ext_str = f.ext.as_str();
 
         let res_str = match (f.resolution.width, f.resolution.height) {
