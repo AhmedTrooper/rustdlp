@@ -34,10 +34,14 @@ impl VideoMetadata {
     }
 
     pub fn find_format_by_id(&self, id: &str) -> Option<&StreamFormat> {
-        self.formats.iter().find(|f| f.format_id.as_str() == id || f.itag.to_string() == id)
+        self.formats
+            .iter()
+            .find(|f| f.format_id.as_str() == id || f.itag.to_string() == id)
     }
 
     pub fn find_subtitle(&self, lang: &str) -> Option<&SubtitleTrack> {
-        self.subtitles.iter().find(|s| s.language_code == lang || s.language_code.starts_with(lang))
+        self.subtitles
+            .iter()
+            .find(|s| s.language_code == lang || s.language_code.starts_with(lang))
     }
 }

@@ -28,21 +28,19 @@ impl DlpConfig {
     }
 
     pub fn build_http_client(&self) -> Result<reqwest::Client> {
-        let mut builder = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30));
+        let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30));
 
         if let Some(ref proxy_url) = self.proxy {
-            let proxy = reqwest::Proxy::all(proxy_url)
-                .map_err(|e| DlpError::Network(e))?;
+            let proxy = reqwest::Proxy::all(proxy_url).map_err(DlpError::Network)?;
             builder = builder.proxy(proxy);
         }
 
-        if let Some(ref cookie_file) = self.cookies_path {
-            if cookie_file.exists() {
-                let jar = Arc::new(Jar::default());
-                Self::load_netscape_cookies(cookie_file, &jar)?;
-                builder = builder.cookie_provider(jar);
-            }
+        if let Some(ref cookie_file) = self.cookies_path
+            && cookie_file.exists()
+        {
+            let jar = Arc::new(Jar::default());
+            Self::load_netscape_cookies(cookie_file, &jar)?;
+            builder = builder.cookie_provider(jar);
         }
 
         builder.build().map_err(DlpError::Network)
@@ -56,12 +54,14 @@ impl DlpConfig {
             let line = line?;
             let trimmed = line.trim();
 
-            if trimmed.is_empty() || (trimmed.starts_with('#') && !trimmed.starts_with("#HttpOnly_")) {
+            if trimmed.is_empty()
+                || (trimmed.starts_with('#') && !trimmed.starts_with("#HttpOnly_"))
+            {
                 continue;
             }
 
-            let cleaned = if trimmed.starts_with("#HttpOnly_") {
-                &trimmed[10..]
+            let cleaned = if let Some(stripped) = trimmed.strip_prefix("#HttpOnly_") {
+                stripped
             } else {
                 trimmed
             };
@@ -78,7 +78,8 @@ impl DlpConfig {
 
                 let scheme = if secure { "https" } else { "http" };
                 let host = domain.trim_start_matches('.');
-                let cookie_str = format!("{}={}; Path={}; Domain={}", name, value, path_str, domain);
+                let cookie_str =
+                    format!("{}={}; Path={}; Domain={}", name, value, path_str, domain);
 
                 if let Ok(url) = Url::parse(&format!("{}://{}/", scheme, host)) {
                     jar.add_cookie_str(&cookie_str, &url);

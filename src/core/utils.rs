@@ -39,12 +39,14 @@ pub fn format_bitrate(bps: u64) -> String {
 }
 
 pub fn sanitize_filename(name: &str) -> String {
-    let forbidden = ['/', '\\', ':', '*', '?', '"', '<', '>', '|', '\0', '\n', '\r', '\t'];
+    let forbidden = [
+        '/', '\\', ':', '*', '?', '"', '<', '>', '|', '\0', '\n', '\r', '\t',
+    ];
     let sanitized: String = name
         .chars()
         .map(|c| if forbidden.contains(&c) { '_' } else { c })
         .collect();
-    
+
     let trimmed = sanitized.trim_matches(|c: char| c.is_whitespace() || c == '.');
     if trimmed.is_empty() {
         "video".to_string()
@@ -107,13 +109,25 @@ mod tests {
 
     #[test]
     fn test_sanitize_filename() {
-        assert_eq!(sanitize_filename("Rick Astley - Never Gonna Give You Up (Official Music Video)"), "Rick Astley - Never Gonna Give You Up (Official Music Video)");
-        assert_eq!(sanitize_filename("Test / Video: Title? *"), "Test _ Video_ Title_ _");
+        assert_eq!(
+            sanitize_filename("Rick Astley - Never Gonna Give You Up (Official Music Video)"),
+            "Rick Astley - Never Gonna Give You Up (Official Music Video)"
+        );
+        assert_eq!(
+            sanitize_filename("Test / Video: Title? *"),
+            "Test _ Video_ Title_ _"
+        );
     }
 
     #[test]
     fn test_resolve_output_path() {
-        let path = resolve_output_path("%(title)s [%(id)s].%(ext)s", "Song Title", "dQw4w9WgXcQ", "Artist", "mp4");
+        let path = resolve_output_path(
+            "%(title)s [%(id)s].%(ext)s",
+            "Song Title",
+            "dQw4w9WgXcQ",
+            "Artist",
+            "mp4",
+        );
         assert_eq!(path, PathBuf::from("Song Title [dQw4w9WgXcQ].mp4"));
     }
 }

@@ -36,15 +36,25 @@ impl SubtitleConverter {
         }
 
         let mut vtt = String::from("WEBVTT\nKind: captions\n\n");
-        let re_p = regex::Regex::new(r#"<p\s+t="(\d+)"(?:\s+d="(\d+)")?[^>]*>([\s\S]*?)</p>"#).unwrap();
-        let re_text = regex::Regex::new(r#"<text\s+start="([\d\.]+)"(?:\s+dur="([\d\.]+)")?[^>]*>([\s\S]*?)</text>"#).unwrap();
+        let re_p =
+            regex::Regex::new(r#"<p\s+t="(\d+)"(?:\s+d="(\d+)")?[^>]*>([\s\S]*?)</p>"#).unwrap();
+        let re_text = regex::Regex::new(
+            r#"<text\s+start="([\d\.]+)"(?:\s+dur="([\d\.]+)")?[^>]*>([\s\S]*?)</text>"#,
+        )
+        .unwrap();
 
         let mut matched = false;
 
         for cap in re_p.captures_iter(xml) {
             matched = true;
-            let start_ms: u64 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
-            let dur_ms: u64 = cap.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(2000);
+            let start_ms: u64 = cap
+                .get(1)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(0);
+            let dur_ms: u64 = cap
+                .get(2)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(2000);
             let raw_text = cap.get(3).map(|m| m.as_str()).unwrap_or("");
 
             let text = Self::clean_xml_text(raw_text);
@@ -60,8 +70,14 @@ impl SubtitleConverter {
 
         if !matched {
             for cap in re_text.captures_iter(xml) {
-                let start_sec: f64 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
-                let dur_sec: f64 = cap.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(2.0);
+                let start_sec: f64 = cap
+                    .get(1)
+                    .and_then(|m| m.as_str().parse().ok())
+                    .unwrap_or(0.0);
+                let dur_sec: f64 = cap
+                    .get(2)
+                    .and_then(|m| m.as_str().parse().ok())
+                    .unwrap_or(2.0);
                 let raw_text = cap.get(3).map(|m| m.as_str()).unwrap_or("");
 
                 let text = Self::clean_xml_text(raw_text);
@@ -85,16 +101,26 @@ impl SubtitleConverter {
     /// Converts YouTube TimedText format 3 XML to SRT format
     pub fn timedtext_to_srt(xml: &str) -> String {
         let mut srt = String::new();
-        let re_p = regex::Regex::new(r#"<p\s+t="(\d+)"(?:\s+d="(\d+)")?[^>]*>([\s\S]*?)</p>"#).unwrap();
-        let re_text = regex::Regex::new(r#"<text\s+start="([\d\.]+)"(?:\s+dur="([\d\.]+)")?[^>]*>([\s\S]*?)</text>"#).unwrap();
+        let re_p =
+            regex::Regex::new(r#"<p\s+t="(\d+)"(?:\s+d="(\d+)")?[^>]*>([\s\S]*?)</p>"#).unwrap();
+        let re_text = regex::Regex::new(
+            r#"<text\s+start="([\d\.]+)"(?:\s+dur="([\d\.]+)")?[^>]*>([\s\S]*?)</text>"#,
+        )
+        .unwrap();
 
         let mut index = 1;
         let mut matched = false;
 
         for cap in re_p.captures_iter(xml) {
             matched = true;
-            let start_ms: u64 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
-            let dur_ms: u64 = cap.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(2000);
+            let start_ms: u64 = cap
+                .get(1)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(0);
+            let dur_ms: u64 = cap
+                .get(2)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(2000);
             let raw_text = cap.get(3).map(|m| m.as_str()).unwrap_or("");
 
             let text = Self::clean_xml_text(raw_text);
@@ -105,14 +131,23 @@ impl SubtitleConverter {
             let start_ts = Self::format_srt_timestamp(start_ms);
             let end_ts = Self::format_srt_timestamp(start_ms + dur_ms);
 
-            srt.push_str(&format!("{}\n{} --> {}\n{}\n\n", index, start_ts, end_ts, text));
+            srt.push_str(&format!(
+                "{}\n{} --> {}\n{}\n\n",
+                index, start_ts, end_ts, text
+            ));
             index += 1;
         }
 
         if !matched {
             for cap in re_text.captures_iter(xml) {
-                let start_sec: f64 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0.0);
-                let dur_sec: f64 = cap.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(2.0);
+                let start_sec: f64 = cap
+                    .get(1)
+                    .and_then(|m| m.as_str().parse().ok())
+                    .unwrap_or(0.0);
+                let dur_sec: f64 = cap
+                    .get(2)
+                    .and_then(|m| m.as_str().parse().ok())
+                    .unwrap_or(2.0);
                 let raw_text = cap.get(3).map(|m| m.as_str()).unwrap_or("");
 
                 let text = Self::clean_xml_text(raw_text);
@@ -126,7 +161,10 @@ impl SubtitleConverter {
                 let start_ts = Self::format_srt_timestamp(start_ms);
                 let end_ts = Self::format_srt_timestamp(start_ms + dur_ms);
 
-                srt.push_str(&format!("{}\n{} --> {}\n{}\n\n", index, start_ts, end_ts, text));
+                srt.push_str(&format!(
+                    "{}\n{} --> {}\n{}\n\n",
+                    index, start_ts, end_ts, text
+                ));
                 index += 1;
             }
         }
@@ -139,7 +177,8 @@ impl SubtitleConverter {
         let re_tag = regex::Regex::new(r"<[^>]+>").unwrap();
         s = re_tag.replace_all(&s, "").to_string();
 
-        s = s.replace("&amp;", "&")
+        s = s
+            .replace("&amp;", "&")
             .replace("&#39;", "'")
             .replace("&quot;", "\"")
             .replace("&lt;", "<")
