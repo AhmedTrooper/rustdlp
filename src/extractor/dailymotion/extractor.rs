@@ -4,8 +4,8 @@ use crate::extractor::dailymotion::url::{extract_dailymotion_id, is_dailymotion_
 use crate::extractor::traits::Extractor;
 use crate::models::video::VideoMetadata;
 use async_trait::async_trait;
-use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
-use serde_json::Value;
+use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
+use serde_json::{Value, json};
 
 pub struct DailymotionExtractor {
     http: reqwest::Client,
@@ -44,10 +44,6 @@ impl Extractor for DailymotionExtractor {
 
     async fn extract(&self, url: &str) -> Result<VideoMetadata> {
         let video_id = extract_dailymotion_id(url)?;
-        let meta_url = format!(
-            "https://www.dailymotion.com/player/metadata/video/{}",
-            video_id.as_str()
-        );
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -57,46 +53,101 @@ impl Extractor for DailymotionExtractor {
             ),
         );
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        headers.insert(
+            "Referer",
+            HeaderValue::from_static("https://www.dailymotion.com/"),
+        );
 
-        let response = self.http.get(&meta_url).headers(headers).send().await?;
-        if !response.status().is_success() {
-            return Err(DlpError::ExtractionError(format!(
-                "Dailymotion metadata request failed with HTTP {}",
-                response.status()
-            )));
+        // 1. Try Player Metadata API
+        let meta_url = format!(
+            "https://www.dailymotion.com/player/metadata/video/{}",
+            video_id.as_str()
+        );
+
+        if let Ok(response) = self
+            .http
+            .get(&meta_url)
+            .headers(headers.clone())
+            .send()
+            .await
+            && response.status().is_success()
+            && let Ok(json_val) = response.json::<Value>().await
+        {
+            let parsed = DailymotionParser::parse_metadata_json(&json_val, video_id.as_str());
+            if !parsed.formats.is_empty() {
+                let title = parsed
+                    .title
+                    .unwrap_or_else(|| format!("Dailymotion video #{}", video_id));
+                let uploader = parsed
+                    .uploader
+                    .unwrap_or_else(|| "Dailymotion User".to_string());
+
+                return Ok(VideoMetadata {
+                    id: video_id,
+                    title,
+                    uploader,
+                    channel_id: None,
+                    duration: parsed.duration,
+                    view_count: None,
+                    description: parsed.description,
+                    upload_date: None,
+                    thumbnails: parsed.thumbnails,
+                    formats: parsed.formats,
+                    subtitles: Vec::new(),
+                    webpage_url: url.to_string(),
+                    is_live: false,
+                });
+            }
         }
 
-        let json_val: Value = response.json().await?;
-        let parsed = DailymotionParser::parse_metadata_json(&json_val, video_id.as_str());
+        // 2. Fallback: GraphQL API
+        let gql_url = "https://graphql.dailymotion.com/";
+        let gql_body = json!({
+            "query": "query VideoQuery($id: String!) { video(xid: $id) { id title description duration owner { username screenname } posterUrl } }",
+            "variables": { "id": video_id.as_str() }
+        });
 
-        if parsed.formats.is_empty() {
-            return Err(DlpError::VideoUnavailable(format!(
-                "No downloadable video formats found for Dailymotion video ID: {}",
-                video_id
-            )));
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        if let Ok(response) = self
+            .http
+            .post(gql_url)
+            .headers(headers)
+            .json(&gql_body)
+            .send()
+            .await
+            && response.status().is_success()
+            && let Ok(gql_val) = response.json::<Value>().await
+            && let Some(video_node) = gql_val.pointer("/data/video")
+        {
+            let parsed = DailymotionParser::parse_metadata_json(video_node, video_id.as_str());
+            let title = parsed
+                .title
+                .unwrap_or_else(|| format!("Dailymotion video #{}", video_id));
+            let uploader = parsed
+                .uploader
+                .unwrap_or_else(|| "Dailymotion User".to_string());
+
+            return Ok(VideoMetadata {
+                id: video_id,
+                title,
+                uploader,
+                channel_id: None,
+                duration: parsed.duration,
+                view_count: None,
+                description: parsed.description,
+                upload_date: None,
+                thumbnails: parsed.thumbnails,
+                formats: parsed.formats,
+                subtitles: Vec::new(),
+                webpage_url: url.to_string(),
+                is_live: false,
+            });
         }
 
-        let title = parsed
-            .title
-            .unwrap_or_else(|| format!("Dailymotion video #{}", video_id));
-        let uploader = parsed
-            .uploader
-            .unwrap_or_else(|| "Dailymotion User".to_string());
-
-        Ok(VideoMetadata {
-            id: video_id,
-            title,
-            uploader,
-            channel_id: None,
-            duration: parsed.duration,
-            view_count: None,
-            description: parsed.description,
-            upload_date: None,
-            thumbnails: parsed.thumbnails,
-            formats: parsed.formats,
-            subtitles: Vec::new(),
-            webpage_url: url.to_string(),
-            is_live: false,
-        })
+        Err(DlpError::VideoUnavailable(format!(
+            "No downloadable video formats found for Dailymotion video ID: {}",
+            video_id
+        )))
     }
 }

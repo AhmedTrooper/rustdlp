@@ -1,5 +1,6 @@
 use crate::core::types::{FormatId, MediaType, Protocol, Resolution};
 use crate::models::format::StreamFormat;
+use crate::models::subtitle::SubtitleTrack;
 use serde_json::Value;
 
 #[derive(Debug, Default)]
@@ -10,6 +11,7 @@ pub struct VimeoParsedData {
     pub duration: Option<u64>,
     pub thumbnails: Vec<String>,
     pub formats: Vec<StreamFormat>,
+    pub subtitles: Vec<SubtitleTrack>,
 }
 
 pub struct VimeoParser;
@@ -116,6 +118,30 @@ impl VimeoParser {
                         source_client: "vimeo_hls".to_string(),
                     });
                     break;
+                }
+            }
+        }
+
+        // 3. Subtitles / Text Tracks
+        if let Some(tracks) = files.get("text_tracks").and_then(|v| v.as_array()) {
+            for t in tracks {
+                if let Some(url_str) = t.get("url").and_then(|v| v.as_str()) {
+                    let lang = t.get("lang").and_then(|v| v.as_str()).unwrap_or("en");
+                    let label = t.get("label").and_then(|v| v.as_str()).unwrap_or(lang);
+                    let full_url = if url_str.starts_with("//") {
+                        format!("https:{}", url_str)
+                    } else if url_str.starts_with('/') {
+                        format!("https://vimeo.com{}", url_str)
+                    } else {
+                        url_str.to_string()
+                    };
+
+                    data.subtitles.push(SubtitleTrack {
+                        language_code: lang.to_string(),
+                        name: label.to_string(),
+                        base_url: full_url,
+                        is_auto_generated: false,
+                    });
                 }
             }
         }

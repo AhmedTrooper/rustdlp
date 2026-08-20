@@ -57,6 +57,7 @@ impl Extractor for VimeoExtractor {
             ),
         );
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        headers.insert("Referer", HeaderValue::from_static("https://vimeo.com/"));
 
         let response = self.http.get(&config_url).headers(headers).send().await?;
         if !response.status().is_success() {
@@ -92,7 +93,7 @@ impl Extractor for VimeoExtractor {
             upload_date: None,
             thumbnails: parsed.thumbnails,
             formats: parsed.formats,
-            subtitles: Vec::new(),
+            subtitles: parsed.subtitles,
             webpage_url: url.to_string(),
             is_live: false,
         })

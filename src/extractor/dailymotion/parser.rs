@@ -42,10 +42,13 @@ impl DailymotionParser {
                 }
             }
         }
+        if let Some(poster) = val.get("posterUrl").and_then(|v| v.as_str()) {
+            thumbnails.push(poster.to_string());
+        }
 
         let mut formats = Vec::new();
 
-        // Qualities extraction (HLS master playlist and direct qualities)
+        // 1. Qualities extraction (HLS master playlist and direct qualities)
         if let Some(qualities) = val.get("qualities").and_then(|v| v.as_object()) {
             for (q_name, q_arr) in qualities {
                 if let Some(arr) = q_arr.as_array() {
@@ -90,6 +93,44 @@ impl DailymotionParser {
                             });
                         }
                     }
+                }
+            }
+        }
+
+        // 2. Stream url in qualities edges (GraphQL response format)
+        if let Some(edges) = val.pointer("/qualities/edges").and_then(|v| v.as_array()) {
+            for (idx, edge) in edges.iter().enumerate() {
+                if let Some(node) = edge.get("node")
+                    && let Some(url_str) = node.get("url").and_then(|v| v.as_str())
+                {
+                    let is_hls = url_str.contains(".m3u8");
+                    let idx_num = idx + 1;
+                    formats.push(StreamFormat {
+                        format_id: FormatId::new(format!("graphql-{}", idx_num)),
+                        url: url_str.to_string(),
+                        ext: "mp4".to_string(),
+                        resolution: Resolution {
+                            width: Some(1920),
+                            height: Some(1080),
+                        },
+                        fps: Some(30),
+                        bitrate: Some(3_000_000),
+                        filesize: None,
+                        filesize_approx: None,
+                        media_type: MediaType::Combined,
+                        protocol: if is_hls {
+                            Protocol::Hls
+                        } else {
+                            Protocol::Https
+                        },
+                        vcodec: Some("h264".to_string()),
+                        acodec: Some("aac".to_string()),
+                        audio_sample_rate: Some(44100),
+                        audio_channels: Some(2),
+                        itag: 1080,
+                        quality_label: Some("HD".to_string()),
+                        source_client: "dailymotion_graphql".to_string(),
+                    });
                 }
             }
         }
