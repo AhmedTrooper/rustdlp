@@ -95,7 +95,7 @@ impl Extractor for LinkedInExtractor {
             upload_date: None,
             thumbnails: parsed.thumbnails,
             formats: parsed.formats,
-            subtitles: Vec::new(),
+            subtitles: parsed.subtitles,
             webpage_url: url.to_string(),
             is_live: false,
         })

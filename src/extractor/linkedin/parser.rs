@@ -1,5 +1,6 @@
 use crate::core::types::{FormatId, MediaType, Protocol, Resolution};
 use crate::models::format::StreamFormat;
+use crate::models::subtitle::SubtitleTrack;
 use regex::Regex;
 use serde_json::Value;
 
@@ -11,6 +12,7 @@ pub struct LinkedInParsedData {
     pub duration: Option<u64>,
     pub thumbnails: Vec<String>,
     pub formats: Vec<StreamFormat>,
+    pub subtitles: Vec<SubtitleTrack>,
 }
 
 pub struct LinkedInParser;
@@ -59,7 +61,20 @@ impl LinkedInParser {
             }
         }
 
-        // 2. OpenGraph Fallbacks
+        // 2. Extract Subtitles / Captions
+        let captions_re = Regex::new(r#"data-captions-url="([^"]+)""#).unwrap();
+        if let Some(cap) = captions_re.captures(html)
+            && let Some(c_url) = cap.get(1)
+        {
+            data.subtitles.push(SubtitleTrack {
+                language_code: "en".to_string(),
+                name: "English".to_string(),
+                base_url: c_url.as_str().replace("&amp;", "&"),
+                is_auto_generated: false,
+            });
+        }
+
+        // 3. OpenGraph Fallbacks
         let og_title_re =
             Regex::new(r#"<meta\s+(?:property|name)=["']og:title["']\s+content=["'](.*?)["']"#)
                 .unwrap();

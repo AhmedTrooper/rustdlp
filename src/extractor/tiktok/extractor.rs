@@ -20,6 +20,7 @@ impl TikTokExtractor {
     pub fn new() -> Self {
         Self {
             http: reqwest::Client::builder()
+                .cookie_store(true)
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .unwrap_or_default(),
@@ -42,8 +43,6 @@ impl Extractor for TikTokExtractor {
     }
 
     async fn extract(&self, url: &str) -> Result<VideoMetadata> {
-        let video_id = extract_tiktok_video_id(url)?;
-
         let mut headers = HeaderMap::new();
         headers.insert(
             USER_AGENT,
@@ -59,6 +58,7 @@ impl Extractor for TikTokExtractor {
         );
         headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-us,en;q=0.5"));
 
+        // Follow any short link redirects (e.g. vm.tiktok.com / vt.tiktok.com)
         let response = self.http.get(url).headers(headers).send().await?;
         if !response.status().is_success() {
             return Err(DlpError::ExtractionError(format!(
@@ -67,12 +67,16 @@ impl Extractor for TikTokExtractor {
             )));
         }
 
+        let final_url = response.url().to_string();
+        let video_id =
+            extract_tiktok_video_id(&final_url).or_else(|_| extract_tiktok_video_id(url))?;
+
         let html = response.text().await?;
         let parsed = TikTokParser::parse_html(&html, video_id.as_str());
 
         if parsed.formats.is_empty() {
             return Err(DlpError::VideoUnavailable(format!(
-                "No downloadable video formats found for TikTok video ID: {}",
+                "No downloadable video streams found for TikTok ID: {}",
                 video_id
             )));
         }
@@ -80,7 +84,9 @@ impl Extractor for TikTokExtractor {
         let title = parsed
             .title
             .unwrap_or_else(|| format!("TikTok video #{}", video_id));
-        let uploader = parsed.uploader.unwrap_or_else(|| "TikTok User".to_string());
+        let uploader = parsed
+            .uploader
+            .unwrap_or_else(|| "TikTok Creator".to_string());
 
         Ok(VideoMetadata {
             id: video_id,
@@ -88,13 +94,13 @@ impl Extractor for TikTokExtractor {
             uploader,
             channel_id: None,
             duration: parsed.duration,
-            view_count: parsed.view_count,
+            view_count: None,
             description: parsed.description,
             upload_date: None,
             thumbnails: parsed.thumbnails,
             formats: parsed.formats,
             subtitles: Vec::new(),
-            webpage_url: url.to_string(),
+            webpage_url: final_url,
             is_live: false,
         })
     }
