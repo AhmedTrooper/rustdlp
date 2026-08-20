@@ -176,6 +176,10 @@ impl InnertubeClient {
         Self { http }
     }
 
+    pub fn with_http(http: reqwest::Client) -> Self {
+        Self { http }
+    }
+
     pub async fn fetch_player(
         &self,
         video_id: &VideoId,

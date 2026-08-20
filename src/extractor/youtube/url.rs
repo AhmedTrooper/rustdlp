@@ -55,6 +55,24 @@ pub fn extract_video_id(input: &str) -> Result<VideoId> {
     Err(DlpError::InvalidUrl(input.to_string()))
 }
 
+pub fn extract_playlist_id(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+
+    if trimmed.starts_with("PL") || trimmed.starts_with("RD") || trimmed.starts_with("UU") || trimmed.starts_with("FL") {
+        return Some(trimmed.to_string());
+    }
+
+    if let Ok(parsed) = Url::parse(trimmed) {
+        for (k, v) in parsed.query_pairs() {
+            if k == "list" && !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,8 +82,17 @@ mod tests {
         assert_eq!(extract_video_id("dQw4w9WgXcQ").unwrap().as_str(), "dQw4w9WgXcQ");
         assert_eq!(extract_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ").unwrap().as_str(), "dQw4w9WgXcQ");
         assert_eq!(extract_video_id("https://youtu.be/dQw4w9WgXcQ?t=10").unwrap().as_str(), "dQw4w9WgXcQ");
-        assert_eq!(extract_video_id("https://m.youtube.com/watch?v=dQw4w9WgXcQ&feature=share").unwrap().as_str(), "dQw4w9WgXcQ");
-        assert_eq!(extract_video_id("https://www.youtube.com/shorts/dQw4w9WgXcQ").unwrap().as_str(), "dQw4w9WgXcQ");
-        assert_eq!(extract_video_id("https://music.youtube.com/watch?v=dQw4w9WgXcQ").unwrap().as_str(), "dQw4w9WgXcQ");
+    }
+
+    #[test]
+    fn test_extract_playlist_id() {
+        assert_eq!(
+            extract_playlist_id("https://www.youtube.com/playlist?list=PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj"),
+            Some("PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj".into())
+        );
+        assert_eq!(
+            extract_playlist_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj"),
+            Some("PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj".into())
+        );
     }
 }

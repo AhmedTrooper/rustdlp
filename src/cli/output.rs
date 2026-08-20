@@ -29,6 +29,26 @@ pub fn print_video_info(meta: &VideoMetadata) {
     }
 }
 
+pub fn print_subtitles_table(meta: &VideoMetadata) {
+    if meta.subtitles.is_empty() {
+        println!("{} No subtitles available for {}", "[info]".blue().bold(), meta.id.as_str().cyan());
+        return;
+    }
+
+    println!(
+        "{} Available subtitles for {}:",
+        "[info]".blue().bold(),
+        meta.id.as_str().cyan()
+    );
+    println!("{:<10} {:<30} {}", "Language".bold(), "Name".bold(), "Type".bold());
+    println!("{}", "─".repeat(60).dimmed());
+
+    for sub in &meta.subtitles {
+        let kind = if sub.is_auto_generated { "auto-generated (ASR)".yellow() } else { "manual".green() };
+        println!("{:<10} {:<30} {}", sub.language_code.cyan(), sub.name, kind);
+    }
+}
+
 pub fn print_format_table(meta: &VideoMetadata) {
     println!(
         "{} Available formats for {}:",

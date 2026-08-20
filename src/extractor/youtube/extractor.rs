@@ -4,6 +4,7 @@ use crate::extractor::traits::Extractor;
 use crate::extractor::youtube::client::{InnertubeClient, InnertubeClientType};
 use crate::extractor::youtube::parser::parse_stream_format;
 use crate::extractor::youtube::url::extract_video_id;
+use crate::models::subtitle::SubtitleTrack;
 use crate::models::innertube::InnertubePlayerResponse;
 use crate::models::video::VideoMetadata;
 use async_trait::async_trait;
@@ -17,6 +18,12 @@ impl YoutubeExtractor {
     pub fn new() -> Self {
         Self {
             client: InnertubeClient::new(),
+        }
+    }
+
+    pub fn with_http_client(http: reqwest::Client) -> Self {
+        Self {
+            client: InnertubeClient::with_http(http),
         }
     }
 
@@ -51,10 +58,7 @@ impl YoutubeExtractor {
                             .as_ref()
                             .and_then(|s| s.reason.as_deref())
                             .unwrap_or("Video unavailable");
-                        if primary_meta.is_none() {
-                            // If first client returned an explicit error, store it
-                            log::debug!("Client {} returned status {}: {}", client_type.name(), status, reason);
-                        }
+                        log::debug!("Client {} returned status {}: {}", client_type.name(), status, reason);
                     }
                 }
                 Err(e) => {
@@ -98,6 +102,8 @@ impl YoutubeExtractor {
         // Collect and deduplicate formats across all successful client responses
         let mut all_formats = Vec::new();
         let mut seen_itags = HashSet::new();
+        let mut subtitles = Vec::new();
+        let mut seen_subs = HashSet::new();
 
         for (client_name, resp) in responses {
             if let Some(streaming_data) = resp.streaming_data {
@@ -120,6 +126,30 @@ impl YoutubeExtractor {
                             if let Some(stream_fmt) = parse_stream_format(&raw, client_name) {
                                 seen_itags.insert(raw.itag);
                                 all_formats.push(stream_fmt);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Extract captions from whichever client returned them
+            if let Some(captions_container) = resp.captions {
+                if let Some(renderer) = captions_container.player_captions_tracklist_renderer {
+                    if let Some(tracks) = renderer.caption_tracks {
+                        for track in tracks {
+                            if !seen_subs.contains(&track.language_code) {
+                                seen_subs.insert(track.language_code.clone());
+                                let name = track
+                                    .name
+                                    .and_then(|n| n.simple_text.or_else(|| n.runs.and_then(|r| r.first().map(|tr| tr.text.clone()))))
+                                    .unwrap_or_else(|| track.language_code.clone());
+                                let is_auto = track.kind.as_deref() == Some("asr");
+                                subtitles.push(SubtitleTrack {
+                                    language_code: track.language_code,
+                                    name,
+                                    base_url: track.base_url,
+                                    is_auto_generated: is_auto,
+                                });
                             }
                         }
                     }
@@ -162,6 +192,7 @@ impl YoutubeExtractor {
             upload_date,
             thumbnails,
             formats: all_formats,
+            subtitles,
             webpage_url,
             is_live,
         })

@@ -11,6 +11,9 @@ pub struct InnertubePlayerResponse {
     #[serde(rename = "streamingData")]
     pub streaming_data: Option<StreamingData>,
 
+    #[serde(rename = "captions")]
+    pub captions: Option<CaptionsContainer>,
+
     #[serde(rename = "microformat")]
     pub microformat: Option<Microformat>,
 }
@@ -97,6 +100,40 @@ pub struct RawFormatStream {
     #[serde(rename = "signatureCipher")]
     pub signature_cipher: Option<String>,
     pub cipher: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptionsContainer {
+    #[serde(rename = "playerCaptionsTracklistRenderer")]
+    pub player_captions_tracklist_renderer: Option<PlayerCaptionsTracklistRenderer>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerCaptionsTracklistRenderer {
+    #[serde(rename = "captionTracks")]
+    pub caption_tracks: Option<Vec<RawCaptionTrack>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawCaptionTrack {
+    #[serde(rename = "baseUrl")]
+    pub base_url: String,
+    pub name: Option<CaptionName>,
+    #[serde(rename = "languageCode")]
+    pub language_code: String,
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptionName {
+    #[serde(rename = "simpleText")]
+    pub simple_text: Option<String>,
+    pub runs: Option<Vec<TextRun>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextRun {
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
