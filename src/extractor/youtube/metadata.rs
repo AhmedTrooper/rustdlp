@@ -20,10 +20,17 @@ pub struct StoryboardSpec {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct HeatmapMarker {
+    pub start_time: f64,
+    pub end_time: Option<f64>,
+    pub intensity: f64, // Normalized 0.0..1.0 float matching yt-dlp _video.py contract
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct YoutubeRichMetadata {
     pub chapters: Vec<Chapter>,
     pub storyboards: Vec<StoryboardSpec>,
-    pub heatmaps: Vec<(f64, f64)>, // (start_seconds, 0_to_100_percent_intensity)
+    pub heatmaps: Vec<HeatmapMarker>,
     pub subtitles: Vec<SubtitleTrack>,
     pub tags: Vec<String>,
     pub categories: Vec<String>,
@@ -163,12 +170,19 @@ impl YoutubeMetadataParser {
             .and_then(|v| v.as_array())
         {
             for mutation in markers_map {
+                if let Some(marker_type) = mutation
+                    .pointer("/payload/macroMarkersListEntity/markersList/markerType")
+                    .and_then(|v| v.as_str())
+                    && marker_type != "MARKER_TYPE_HEATMAP"
+                {
+                    continue;
+                }
                 if let Some(heat_markers) = mutation
                     .pointer("/payload/macroMarkersListEntity/markersList/markers")
                     .and_then(|v| v.as_array())
                 {
                     for marker in heat_markers {
-                        if let (Some(time_frac), Some(intensity)) = (
+                        if let (Some(start_ms), Some(intensity)) = (
                             marker
                                 .get("startMillis")
                                 .and_then(|v| v.as_str())
@@ -177,7 +191,17 @@ impl YoutubeMetadataParser {
                                 .get("intensityScoreNormalized")
                                 .and_then(|v| v.as_f64()),
                         ) {
-                            meta.heatmaps.push((time_frac / 1000.0, intensity));
+                            let duration_ms = marker
+                                .get("durationMillis")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok());
+                            let start_time = start_ms / 1000.0;
+                            let end_time = duration_ms.map(|d| (start_ms + d) / 1000.0);
+                            meta.heatmaps.push(HeatmapMarker {
+                                start_time,
+                                end_time,
+                                intensity,
+                            });
                         }
                     }
                 }

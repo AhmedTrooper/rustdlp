@@ -2,6 +2,7 @@ use crate::core::error::{DlpError, Result};
 use crate::extractor::youtube::jsc::JsChallengeSolver;
 use std::collections::HashMap;
 use url::Url;
+use url::form_urlencoded;
 
 pub struct CipherHelper;
 
@@ -12,12 +13,8 @@ impl CipherHelper {
         solver: Option<&JsChallengeSolver>,
     ) -> Result<String> {
         let mut params = HashMap::new();
-        for pair in cipher_str.split('&') {
-            if let Some((k, v)) = pair.split_once('=') {
-                let decoded_key = urlencoding::decode(k).unwrap_or(std::borrow::Cow::Borrowed(k));
-                let decoded_val = urlencoding::decode(v).unwrap_or(std::borrow::Cow::Borrowed(v));
-                params.insert(decoded_key.to_string(), decoded_val.to_string());
-            }
+        for (k, v) in form_urlencoded::parse(cipher_str.as_bytes()) {
+            params.insert(k.into_owned(), v.into_owned());
         }
 
         let base_url = params.get("url").ok_or_else(|| {
@@ -41,29 +38,5 @@ impl CipherHelper {
         } else {
             Ok(base_url.to_string())
         }
-    }
-}
-
-mod urlencoding {
-    use std::borrow::Cow;
-
-    pub fn decode(s: &str) -> Option<Cow<'_, str>> {
-        let mut res = String::with_capacity(s.len());
-        let mut chars = s.chars().peekable();
-
-        while let Some(c) = chars.next() {
-            if c == '%' {
-                let h1 = chars.next()?;
-                let h2 = chars.next()?;
-                let hex_str = format!("{}{}", h1, h2);
-                let byte = u8::from_str_radix(&hex_str, 16).ok()?;
-                res.push(byte as char);
-            } else if c == '+' {
-                res.push(' ');
-            } else {
-                res.push(c);
-            }
-        }
-        Some(Cow::Owned(res))
     }
 }

@@ -48,8 +48,26 @@ impl YoutubeExtractor {
         client: InnertubeClientKind,
         video_id: &str,
         visitor_data: Option<&str>,
+        sts: Option<u64>,
     ) -> Result<Value> {
-        let payload = client.build_payload(video_id, visitor_data);
+        let mut payload = client.build_payload(video_id, visitor_data);
+
+        if let Some(ts) = sts {
+            if let Some(ctx) = payload.get_mut("playbackContext") {
+                if let Some(obj) = ctx.as_object_mut() {
+                    obj.insert(
+                        "contentPlaybackContext".to_string(),
+                        serde_json::json!({ "signatureTimestamp": ts }),
+                    );
+                }
+            } else {
+                payload["playbackContext"] = serde_json::json!({
+                    "contentPlaybackContext": {
+                        "signatureTimestamp": ts
+                    }
+                });
+            }
+        }
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -156,10 +174,15 @@ impl Extractor for YoutubeExtractor {
         let mut solver = JsChallengeSolver::new();
         let mut player_js_opt = None;
 
-        // 1. Query Innertube multi-clients (14 clients)
+        // 1. Query Innertube multi-clients (14 clients) with fallback
         for &client in InnertubeClientKind::all() {
             if let Ok(val) = self
-                .fetch_innertube(client, video_id.as_str(), visitor_data_token.as_deref())
+                .fetch_innertube(
+                    client,
+                    video_id.as_str(),
+                    visitor_data_token.as_deref(),
+                    solver.signature_timestamp,
+                )
                 .await
             {
                 if visitor_data_token.is_none() {

@@ -15,6 +15,7 @@ pub enum SigOp {
 pub struct JsChallengeSolver {
     pub player_url: Option<String>,
     pub sig_ops: Vec<SigOp>,
+    pub signature_timestamp: Option<u64>,
 }
 
 static SIG_FUNC_NAME_RE_1: LazyLock<Regex> = LazyLock::new(|| {
@@ -34,6 +35,9 @@ static SIG_FUNC_NAME_RE_3: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap()
 });
 
+static STS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?:signatureTimestamp|sts)\s*:\s*(\d+)"#).unwrap());
+
 static N_FUNC_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?x)
         (?:
@@ -51,6 +55,10 @@ impl JsChallengeSolver {
 
     pub fn parse_player_js(&mut self, player_js: &str) -> Result<()> {
         self.sig_ops = self.extract_sig_ops(player_js)?;
+        self.signature_timestamp = STS_RE
+            .captures(player_js)
+            .and_then(|c| c.get(1))
+            .and_then(|m| m.as_str().parse::<u64>().ok());
         Ok(())
     }
 
@@ -347,6 +355,7 @@ mod tests {
                 ab.yz(a, 5);
                 return a.join("");
             };
+            signatureTimestamp: 19876
         "#;
 
         let mut solver = JsChallengeSolver::new();
@@ -355,6 +364,7 @@ mod tests {
         assert_eq!(solver.sig_ops[0], SigOp::Reverse);
         assert_eq!(solver.sig_ops[1], SigOp::Splice(2));
         assert_eq!(solver.sig_ops[2], SigOp::Swap(5));
+        assert_eq!(solver.signature_timestamp, Some(19876));
 
         let res = solver.decipher_signature("abcdefghijklmnop");
         assert_ne!(res, "abcdefghijklmnop");
