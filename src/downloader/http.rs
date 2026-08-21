@@ -52,7 +52,7 @@ impl HttpDownloader {
 
         let mut total_size = expected_size;
         let ua = user_agent.unwrap_or(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
         );
 
         // If total size unknown, probe with a small range request
@@ -122,8 +122,25 @@ impl HttpDownloader {
                         .map_err(|e| DlpError::DownloadError(e.to_string()))?,
                 );
 
-                let response = self.http.get(url).headers(headers).send().await?;
-                let status = response.status();
+                let mut response = self.http.get(url).headers(headers.clone()).send().await?;
+                let mut status = response.status();
+
+                if status == reqwest::StatusCode::FORBIDDEN {
+                    // Retry with standard desktop browser UA
+                    let mut fallback_headers = HeaderMap::new();
+                    fallback_headers.insert(
+                        USER_AGENT,
+                        HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"),
+                    );
+                    fallback_headers.insert(
+                        RANGE,
+                        HeaderValue::from_str(&range_header)
+                            .map_err(|e| DlpError::DownloadError(e.to_string()))?,
+                    );
+                    let retry_resp = self.http.get(url).headers(fallback_headers).send().await?;
+                    status = retry_resp.status();
+                    response = retry_resp;
+                }
 
                 if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
                     return Err(DlpError::DownloadError(format!(
@@ -156,7 +173,34 @@ impl HttpDownloader {
                 );
             }
 
-            let response = self.http.get(url).headers(headers).send().await?;
+            let mut response = self.http.get(url).headers(headers.clone()).send().await?;
+            let mut status = response.status();
+
+            if status == reqwest::StatusCode::FORBIDDEN {
+                let mut fallback_headers = HeaderMap::new();
+                fallback_headers.insert(
+                    USER_AGENT,
+                    HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"),
+                );
+                if downloaded_bytes > 0 {
+                    fallback_headers.insert(
+                        RANGE,
+                        HeaderValue::from_str(&format!("bytes={}-", downloaded_bytes))
+                            .map_err(|e| DlpError::DownloadError(e.to_string()))?,
+                    );
+                }
+                let retry_resp = self.http.get(url).headers(fallback_headers).send().await?;
+                status = retry_resp.status();
+                response = retry_resp;
+            }
+
+            if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
+                return Err(DlpError::DownloadError(format!(
+                    "Download failed with status {}",
+                    status
+                )));
+            }
+
             let mut stream = response.bytes_stream();
 
             while let Some(chunk_res) = stream.next().await {

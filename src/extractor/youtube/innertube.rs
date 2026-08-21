@@ -2,23 +2,27 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InnertubeClientKind {
-    VisionOs,
+    Web,
     Android,
     Ios,
-    Web,
-    WebSafari,
+    Tv,
+    MWeb,
+    TvEmbedded,
     WebEmbedded,
-    WebMusic,
     WebCreator,
     AndroidVr,
+    WebMusic,
     AndroidTestSuite,
-    MWeb,
-    Tv,
-    TvEmbedded,
     TvDowngraded,
+    WebSafari,
+    VisionOs,
 }
 
 impl InnertubeClientKind {
+    /// Ordered list of Innertube clients.
+    /// Note: VisionOS and Android are prioritized at the top because their streaming
+    /// URLs do not mandate SABR/PO-token player sessions, enabling reliable
+    /// unthrottled downloads across all resolutions.
     pub fn all() -> &'static [InnertubeClientKind] {
         &[
             Self::VisionOs,

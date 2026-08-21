@@ -64,7 +64,7 @@ impl StreamFormat {
     }
 
     pub fn user_agent(&self) -> &str {
-        if !self.source_client.is_empty() {
+        if self.source_client.starts_with("Mozilla") || self.source_client.starts_with("com.google") || self.source_client.starts_with("google/") {
             &self.source_client
         } else {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
