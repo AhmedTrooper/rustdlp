@@ -30,6 +30,7 @@ pub struct YoutubeRichMetadata {
     pub like_count: Option<u64>,
     pub subscriber_count: Option<String>,
     pub is_verified: bool,
+    pub is_live: bool,
 }
 
 pub struct YoutubeMetadataParser;
@@ -149,7 +150,34 @@ impl YoutubeMetadataParser {
             }
         }
 
-        // 4. Tags & Categories
+        // 4. Parse Heatmaps (Most Replayed Markers)
+        if let Some(markers_map) = val
+            .pointer("/frameworkUpdates/entityBatchUpdate/mutations")
+            .and_then(|v| v.as_array())
+        {
+            for mutation in markers_map {
+                if let Some(heat_markers) = mutation
+                    .pointer("/payload/macroMarkersListEntity/markersList/markers")
+                    .and_then(|v| v.as_array())
+                {
+                    for marker in heat_markers {
+                        if let (Some(time_frac), Some(intensity)) = (
+                            marker
+                                .get("startMillis")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok()),
+                            marker
+                                .get("intensityScoreNormalized")
+                                .and_then(|v| v.as_f64()),
+                        ) {
+                            meta.heatmaps.push((time_frac / 1000.0, intensity));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Tags & Categories
         if let Some(keywords) = val
             .pointer("/videoDetails/keywords")
             .and_then(|v| v.as_array())
@@ -168,7 +196,16 @@ impl YoutubeMetadataParser {
             meta.categories.push(cat.to_string());
         }
 
-        // 5. HTML markers (if available)
+        meta.is_live = val
+            .pointer("/videoDetails/isLive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+            || val
+                .pointer("/videoDetails/isLiveContent")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+        // 6. HTML markers (if available)
         if let Some(page) = html {
             let likes_re = Regex::new(r#""label":"([0-9,]+)\s+likes"#).unwrap();
             if let Some(cap) = likes_re.captures(page)

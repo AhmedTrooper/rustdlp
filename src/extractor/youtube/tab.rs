@@ -77,7 +77,7 @@ impl YoutubeTabExtractor {
         let response = self
             .http
             .post("https://www.youtube.com/youtubei/v1/browse")
-            .headers(headers)
+            .headers(headers.clone())
             .json(&payload)
             .send()
             .await?;
@@ -90,7 +90,48 @@ impl YoutubeTabExtractor {
         }
 
         let val: Value = response.json().await?;
-        let (title, uploader, items) = self.parse_tab_json(&val);
+        let (title, uploader, mut items, mut next_token) = self.parse_tab_json(&val);
+
+        // Continuation loop for infinite playlist pagination
+        let mut page_count = 0;
+        while let Some(token) = next_token.take() {
+            if page_count >= 50 {
+                break; // Cap pagination to prevent runaway loops
+            }
+            page_count += 1;
+
+            let cont_payload = json!({
+                "context": {
+                    "client": {
+                        "clientName": "WEB",
+                        "clientVersion": "2.20260708.00.00",
+                        "hl": "en",
+                        "gl": "US"
+                    }
+                },
+                "continuation": token
+            });
+
+            if let Ok(cont_resp) = self
+                .http
+                .post("https://www.youtube.com/youtubei/v1/browse")
+                .headers(headers.clone())
+                .json(&cont_payload)
+                .send()
+                .await
+                && cont_resp.status().is_success()
+                && let Ok(cont_val) = cont_resp.json::<Value>().await
+            {
+                let (_, _, page_items, new_token) = self.parse_tab_json(&cont_val);
+                if page_items.is_empty() {
+                    break;
+                }
+                items.extend(page_items);
+                next_token = new_token;
+            } else {
+                break;
+            }
+        }
 
         Ok(PlaylistMetadata {
             id: playlist_id,
@@ -102,7 +143,15 @@ impl YoutubeTabExtractor {
         })
     }
 
-    fn parse_tab_json(&self, val: &Value) -> (Option<String>, Option<String>, Vec<PlaylistItem>) {
+    fn parse_tab_json(
+        &self,
+        val: &Value,
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Vec<PlaylistItem>,
+        Option<String>,
+    ) {
         let title = val
             .pointer("/header/playlistHeaderRenderer/title/simpleText")
             .or_else(|| val.pointer("/header/playlistHeaderRenderer/title/runs/0/text"))
@@ -116,18 +165,28 @@ impl YoutubeTabExtractor {
             .map(|s| s.to_string());
 
         let mut items = Vec::new();
-        self.collect_video_renderers(val, &mut items);
+        let mut next_token = None;
+        self.collect_video_renderers(val, &mut items, &mut next_token);
 
-        (title, uploader, items)
+        (title, uploader, items, next_token)
     }
 
-    fn collect_video_renderers(&self, val: &Value, items: &mut Vec<PlaylistItem>) {
+    fn collect_video_renderers(
+        &self,
+        val: &Value,
+        items: &mut Vec<PlaylistItem>,
+        next_token: &mut Option<String>,
+    ) {
         if let Some(arr) = val.as_array() {
             for item in arr {
-                self.collect_video_renderers(item, items);
+                self.collect_video_renderers(item, items, next_token);
             }
         } else if let Some(obj) = val.as_object() {
-            if let Some(renderer) = obj.get("playlistVideoRenderer") {
+            if let Some(renderer) = obj
+                .get("playlistVideoRenderer")
+                .or_else(|| obj.get("compactVideoRenderer"))
+                .or_else(|| obj.get("gridVideoRenderer"))
+            {
                 if let Some(v_id) = renderer.get("videoId").and_then(|v| v.as_str()) {
                     let title = renderer
                         .pointer("/title/runs/0/text")
@@ -137,6 +196,7 @@ impl YoutubeTabExtractor {
                         .to_string();
                     let uploader = renderer
                         .pointer("/shortBylineText/runs/0/text")
+                        .or_else(|| renderer.pointer("/longBylineText/runs/0/text"))
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
                     let duration = renderer
@@ -157,9 +217,16 @@ impl YoutubeTabExtractor {
                         thumbnail: thumb,
                     });
                 }
+            } else if let Some(cont_item) = obj.get("continuationItemRenderer") {
+                if let Some(token) = cont_item
+                    .pointer("/continuationEndpoint/continuationCommand/token")
+                    .and_then(|v| v.as_str())
+                {
+                    *next_token = Some(token.to_string());
+                }
             } else {
                 for (_, v) in obj {
-                    self.collect_video_renderers(v, items);
+                    self.collect_video_renderers(v, items, next_token);
                 }
             }
         }

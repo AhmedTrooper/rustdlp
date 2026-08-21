@@ -42,8 +42,13 @@ impl YoutubeExtractor {
         self.extract(video_id.as_str()).await
     }
 
-    async fn fetch_innertube(&self, client: InnertubeClientKind, video_id: &str) -> Result<Value> {
-        let payload = client.build_payload(video_id);
+    async fn fetch_innertube(
+        &self,
+        client: InnertubeClientKind,
+        video_id: &str,
+        visitor_data: Option<&str>,
+    ) -> Result<Value> {
+        let payload = client.build_payload(video_id, visitor_data);
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -53,6 +58,20 @@ impl YoutubeExtractor {
         );
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            "X-YouTube-Client-Name",
+            HeaderValue::from_static(client.client_id_num()),
+        );
+        headers.insert(
+            "X-YouTube-Client-Version",
+            HeaderValue::from_static(client.client_version()),
+        );
+
+        if let Some(v_data) = visitor_data
+            && let Ok(hv) = HeaderValue::from_str(v_data)
+        {
+            headers.insert("X-Goog-Visitor-Id", hv);
+        }
 
         let response = self
             .http
@@ -99,12 +118,23 @@ impl Extractor for YoutubeExtractor {
         let mut upload_date: Option<String> = None;
         let mut thumbnails = Vec::new();
         let mut rich_meta = None;
+        let mut visitor_data_token: Option<String> = None;
 
         let solver = JsChallengeSolver::new();
 
         // 1. Query Innertube multi-clients
         for &client in InnertubeClientKind::all() {
-            if let Ok(val) = self.fetch_innertube(client, video_id.as_str()).await {
+            if let Ok(val) = self
+                .fetch_innertube(client, video_id.as_str(), visitor_data_token.as_deref())
+                .await
+            {
+                if visitor_data_token.is_none() {
+                    visitor_data_token = val
+                        .pointer("/responseContext/visitorData")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                }
+
                 // Check playability status
                 let playability_status = val
                     .pointer("/playabilityStatus/status")
@@ -230,7 +260,11 @@ impl Extractor for YoutubeExtractor {
 
         let title_str = title.unwrap_or_else(|| format!("YouTube video #{}", video_id));
         let uploader_str = uploader.unwrap_or_else(|| "YouTube Creator".to_string());
-        let subs = rich_meta.map(|m| m.subtitles).unwrap_or_default();
+        let subs = rich_meta
+            .as_ref()
+            .map(|m| m.subtitles.clone())
+            .unwrap_or_default();
+        let is_live_val = rich_meta.as_ref().map(|m| m.is_live).unwrap_or(false);
 
         Ok(VideoMetadata {
             id: video_id,
@@ -245,7 +279,7 @@ impl Extractor for YoutubeExtractor {
             formats,
             subtitles: subs,
             webpage_url: url.to_string(),
-            is_live: false,
+            is_live: is_live_val,
         })
     }
 }

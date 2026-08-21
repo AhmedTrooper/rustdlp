@@ -62,6 +62,21 @@ impl InnertubeClientKind {
         }
     }
 
+    pub fn client_id_num(&self) -> &'static str {
+        match self {
+            Self::Web | Self::WebSafari => "1",
+            Self::Android => "3",
+            Self::Ios => "5",
+            Self::AndroidVr => "28",
+            Self::WebEmbedded => "56",
+            Self::WebMusic => "67",
+            Self::VisionOs => "101",
+            Self::MWeb => "65",
+            Self::Tv => "31",
+            Self::TvEmbedded => "85",
+        }
+    }
+
     pub fn user_agent(&self) -> &'static str {
         match self {
             Self::Web => {
@@ -98,13 +113,17 @@ impl InnertubeClientKind {
         }
     }
 
-    pub fn build_payload(&self, video_id: &str) -> Value {
+    pub fn build_payload(&self, video_id: &str, visitor_data: Option<&str>) -> Value {
         let mut client_obj = json!({
             "clientName": self.client_name(),
             "clientVersion": self.client_version(),
             "hl": "en",
             "gl": "US",
         });
+
+        if let Some(v_data) = visitor_data {
+            client_obj["visitorData"] = json!(v_data);
+        }
 
         match self {
             Self::Android => {
