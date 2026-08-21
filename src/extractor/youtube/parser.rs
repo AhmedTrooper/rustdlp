@@ -15,15 +15,17 @@ pub struct YoutubeParser;
 impl YoutubeParser {
     pub fn parse_player_response(
         val: &Value,
+        source_ua: Option<&str>,
         solver: Option<&JsChallengeSolver>,
     ) -> Vec<StreamFormat> {
         let mut formats = Vec::new();
         let streaming_data = val.get("streamingData").unwrap_or(val);
+        let client_tag = source_ua.unwrap_or("innertube");
 
         if let Some(arr) = streaming_data.get("formats").and_then(|v| v.as_array()) {
             for item in arr {
                 if let Ok(raw) = serde_json::from_value::<RawFormatStream>(item.clone())
-                    && let Some(f) = parse_stream_format(&raw, "innertube", solver)
+                    && let Some(f) = parse_stream_format(&raw, client_tag, solver)
                 {
                     formats.push(f);
                 }
@@ -36,7 +38,7 @@ impl YoutubeParser {
         {
             for item in arr {
                 if let Ok(raw) = serde_json::from_value::<RawFormatStream>(item.clone())
-                    && let Some(f) = parse_stream_format(&raw, "innertube_dash", solver)
+                    && let Some(f) = parse_stream_format(&raw, client_tag, solver)
                 {
                     formats.push(f);
                 }
@@ -60,134 +62,108 @@ pub fn parse_stream_format(
         None
     }?;
 
-    let mime = raw.mime_type.as_deref().unwrap_or("");
-    let (container, vcodec, acodec) = parse_mime_and_codecs(mime);
+    let itag = raw.itag;
+    let format_id_str = itag.to_string();
 
-    let media_type = match (vcodec.is_some(), acodec.is_some()) {
-        (true, true) => MediaType::Combined,
-        (true, false) => MediaType::VideoOnly,
-        (false, true) => MediaType::AudioOnly,
-        (false, false) => {
-            if mime.starts_with("video") {
-                MediaType::VideoOnly
-            } else if mime.starts_with("audio") {
-                MediaType::AudioOnly
-            } else {
-                MediaType::Combined
-            }
-        }
-    };
-
-    let ext = match (media_type, container.as_str()) {
-        (MediaType::AudioOnly, "mp4") => "m4a".to_string(),
-        (MediaType::AudioOnly, "webm") if acodec.as_deref() == Some("opus") => "opus".to_string(),
-        (_, other) => other.to_string(),
-    };
-
-    let width = raw.width;
-    let height = raw
-        .height
-        .or_else(|| parse_height_from_quality_label(raw.quality_label.as_deref()));
-
-    let resolution = Resolution::new(width, height);
-    let fps = raw.fps.filter(|&f| f > 1);
-
-    let filesize = raw
-        .content_length
-        .as_deref()
-        .and_then(|s| s.parse::<u64>().ok());
-
-    let bitrate = raw.average_bitrate.or(raw.bitrate);
-
-    let approx_duration_sec = raw
-        .approx_duration_ms
-        .as_deref()
-        .and_then(|s| s.parse::<u64>().ok())
-        .map(|ms| ms / 1000);
-
-    let filesize_approx = if filesize.is_none() {
-        if let (Some(br), Some(dur)) = (bitrate, approx_duration_sec) {
-            Some((br * dur) / 8)
-        } else {
-            None
-        }
+    let (media_type, ext, vcodec, acodec) = if let Some(ref mime) = raw.mime_type {
+        parse_mime_type(mime)
     } else {
-        None
+        (MediaType::Combined, "mp4".to_string(), None, None)
     };
 
-    let audio_sample_rate = raw
-        .audio_sample_rate
-        .as_deref()
-        .and_then(|s| s.parse::<u32>().ok());
-
-    let quality_label = raw.quality_label.clone().or_else(|| raw.quality.clone());
+    let resolution = Resolution {
+        width: raw.width,
+        height: raw.height,
+    };
 
     Some(StreamFormat {
-        itag: raw.itag,
-        format_id: FormatId::new(raw.itag.to_string()),
+        itag,
+        format_id: FormatId::new(format_id_str),
         url: raw_url,
         ext,
         resolution,
-        fps,
+        fps: raw.fps,
         vcodec,
         acodec,
-        bitrate,
-        filesize,
-        filesize_approx,
+        bitrate: raw.bitrate,
+        filesize: raw.content_length.as_deref().and_then(|s| s.parse().ok()),
+        filesize_approx: raw.approx_duration_ms.as_deref().and_then(|ms| {
+            let dur_sec = ms.parse::<f64>().ok()? / 1000.0;
+            let br = raw.bitrate? as f64;
+            Some(((br * dur_sec) / 8.0) as u64)
+        }),
         media_type,
         protocol: Protocol::Https,
-        quality_label,
+        quality_label: raw.quality_label.clone(),
         audio_channels: raw.audio_channels,
-        audio_sample_rate,
+        audio_sample_rate: raw
+            .audio_sample_rate
+            .as_deref()
+            .and_then(|s| s.parse().ok()),
         source_client: client_name.to_string(),
     })
 }
 
-fn parse_mime_and_codecs(mime: &str) -> (String, Option<String>, Option<String>) {
+fn parse_mime_type(mime: &str) -> (MediaType, String, Option<String>, Option<String>) {
     if let Some(caps) = MIME_REGEX.captures(mime) {
-        let major = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-        let sub = caps.get(2).map(|m| m.as_str()).unwrap_or("mp4");
-        let raw_codecs = caps.get(3).map(|m| m.as_str());
+        let type_major = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let subtype = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        let codecs = caps.get(3).map(|m| m.as_str().to_string());
+
+        let media_type = match type_major {
+            "audio" => MediaType::AudioOnly,
+            "video" => {
+                if let Some(ref c) = codecs {
+                    if c.contains(',') {
+                        MediaType::Combined
+                    } else {
+                        MediaType::VideoOnly
+                    }
+                } else {
+                    MediaType::Combined
+                }
+            }
+            _ => MediaType::Combined,
+        };
+
+        let ext = match subtype {
+            "mp4" => {
+                if media_type == MediaType::AudioOnly {
+                    "m4a".to_string()
+                } else {
+                    "mp4".to_string()
+                }
+            }
+            "webm" => {
+                if media_type == MediaType::AudioOnly {
+                    "opus".to_string()
+                } else {
+                    "webm".to_string()
+                }
+            }
+            "3gpp" => "3gp".to_string(),
+            other => other.to_string(),
+        };
 
         let mut vcodec = None;
         let mut acodec = None;
 
-        if let Some(codecs_str) = raw_codecs {
-            let codecs: Vec<&str> = codecs_str.split(',').map(|s| s.trim()).collect();
-            for codec in codecs {
-                if codec.starts_with("avc")
-                    || codec.starts_with("vp")
-                    || codec.starts_with("av01")
-                    || codec.starts_with("hev")
-                {
-                    vcodec = Some(codec.to_string());
-                } else if codec.starts_with("mp4a")
-                    || codec.starts_with("opus")
-                    || codec.starts_with("vorbis")
-                    || codec.starts_with("ac-3")
-                {
-                    acodec = Some(codec.to_string());
-                }
+        if let Some(ref c) = codecs {
+            if c.contains(',') {
+                let parts: Vec<&str> = c.split(',').map(|s| s.trim()).collect();
+                vcodec = parts.first().map(|s| s.to_string());
+                acodec = parts.get(1).map(|s| s.to_string());
+            } else if media_type == MediaType::AudioOnly {
+                acodec = Some(c.clone());
+            } else {
+                vcodec = Some(c.clone());
             }
         }
 
-        if vcodec.is_none() && major == "video" {
-            vcodec = Some(sub.to_string());
-        }
-        if acodec.is_none() && major == "audio" {
-            acodec = Some(sub.to_string());
-        }
-
-        (sub.to_string(), vcodec, acodec)
+        (media_type, ext, vcodec, acodec)
     } else {
-        ("mp4".to_string(), None, None)
+        (MediaType::Combined, "mp4".to_string(), None, None)
     }
-}
-
-fn parse_height_from_quality_label(label: Option<&str>) -> Option<u32> {
-    let l = label?;
-    let digits: String = l.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse().ok()
 }
 
 #[cfg(test)]
@@ -196,10 +172,11 @@ pub mod tests {
 
     #[test]
     pub fn test_parse_mime() {
-        let (container, vcodec, acodec) =
-            parse_mime_and_codecs(r#"video/mp4; codecs="avc1.640028, mp4a.40.2""#);
-        assert_eq!(container, "mp4");
-        assert_eq!(vcodec, Some("avc1.640028".into()));
-        assert_eq!(acodec, Some("mp4a.40.2".into()));
+        let mime = r#"video/mp4; codecs="avc1.640028, mp4a.40.2""#;
+        let (media_type, ext, vcodec, acodec) = parse_mime_type(mime);
+        assert_eq!(media_type, MediaType::Combined);
+        assert_eq!(ext, "mp4");
+        assert_eq!(vcodec.as_deref(), Some("avc1.640028"));
+        assert_eq!(acodec.as_deref(), Some("mp4a.40.2"));
     }
 }

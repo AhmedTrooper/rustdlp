@@ -218,14 +218,14 @@ impl YoutubeTabExtractor {
 
             if let Some(custom) = cap.name("custom") {
                 return Err(DlpError::ExtractionError(format!(
-                    "Could not resolve YouTube custom channel '/c/{}' to a valid channel ID",
+                    "Could not resolve YouTube custom channel '{}' to a valid channel ID",
                     custom.as_str()
                 )));
             }
 
             if let Some(user) = cap.name("user") {
                 return Err(DlpError::ExtractionError(format!(
-                    "Could not resolve YouTube user '/user/{}' to a valid channel ID",
+                    "Could not resolve YouTube user '{}' to a valid channel ID",
                     user.as_str()
                 )));
             }

@@ -63,21 +63,11 @@ impl StreamFormat {
         self.bitrate.unwrap_or(0)
     }
 
-    pub fn user_agent(&self) -> &'static str {
-        match self.source_client.as_str() {
-            "visionos" => {
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
-            }
-            "android_vr" => {
-                "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
-            }
-            "android" => "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
-            "ios" => {
-                "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
-            }
-            _ => {
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-            }
+    pub fn user_agent(&self) -> &str {
+        if self.source_client.starts_with("Mozilla") || self.source_client.starts_with("com.google") {
+            &self.source_client
+        } else {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
         }
     }
 }

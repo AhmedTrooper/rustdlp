@@ -1,17 +1,17 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InnertubeClientKind {
+    VisionOs,
+    Android,
+    Ios,
     Web,
     WebSafari,
     WebEmbedded,
     WebMusic,
     WebCreator,
-    Android,
     AndroidVr,
     AndroidTestSuite,
-    Ios,
-    VisionOs,
     MWeb,
     Tv,
     TvEmbedded,
@@ -21,20 +21,20 @@ pub enum InnertubeClientKind {
 impl InnertubeClientKind {
     pub fn all() -> &'static [InnertubeClientKind] {
         &[
-            InnertubeClientKind::VisionOs,
-            InnertubeClientKind::Android,
-            InnertubeClientKind::Ios,
-            InnertubeClientKind::Web,
-            InnertubeClientKind::WebSafari,
-            InnertubeClientKind::WebEmbedded,
-            InnertubeClientKind::WebMusic,
-            InnertubeClientKind::WebCreator,
-            InnertubeClientKind::AndroidVr,
-            InnertubeClientKind::AndroidTestSuite,
-            InnertubeClientKind::MWeb,
-            InnertubeClientKind::Tv,
-            InnertubeClientKind::TvEmbedded,
-            InnertubeClientKind::TvDowngraded,
+            Self::VisionOs,
+            Self::Android,
+            Self::Ios,
+            Self::Web,
+            Self::WebSafari,
+            Self::WebEmbedded,
+            Self::WebMusic,
+            Self::WebCreator,
+            Self::AndroidVr,
+            Self::AndroidTestSuite,
+            Self::MWeb,
+            Self::Tv,
+            Self::TvEmbedded,
+            Self::TvDowngraded,
         ]
     }
 
@@ -137,7 +137,7 @@ impl InnertubeClientKind {
         }
     }
 
-    pub fn build_payload(&self, video_id: &str, visitor_data: Option<&str>) -> Value {
+    pub fn build_payload(&self, video_id: &str, visitor_data: Option<&str>, sts: Option<u64>) -> Value {
         let mut client_obj = json!({
             "clientName": self.client_name(),
             "clientVersion": self.client_version(),
@@ -177,6 +177,8 @@ impl InnertubeClientKind {
             _ => {}
         }
 
+        let sig_ts = sts.unwrap_or(19999);
+
         json!({
             "videoId": video_id,
             "context": {
@@ -192,7 +194,7 @@ impl InnertubeClientKind {
             "playbackContext": {
                 "contentPlaybackContext": {
                     "html5Preference": "HTML5_PREF_WANTS",
-                    "signatureTimestamp": 19999
+                    "signatureTimestamp": sig_ts
                 }
             },
             "contentCheckOk": true,

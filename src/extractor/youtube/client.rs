@@ -22,7 +22,7 @@ impl InnertubeClient {
     ) -> Result<InnertubePlayerResponse> {
         let payload = self
             .client_kind
-            .build_payload(video_id.as_str(), visitor_data);
+            .build_payload(video_id.as_str(), visitor_data, None);
 
         let mut headers = HeaderMap::new();
         headers.insert(

@@ -11,7 +11,7 @@ use crate::models::format::StreamFormat;
 use crate::models::video::VideoMetadata;
 use async_trait::async_trait;
 use regex::Regex;
-use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, USER_AGENT};
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -50,24 +50,7 @@ impl YoutubeExtractor {
         visitor_data: Option<&str>,
         sts: Option<u64>,
     ) -> Result<Value> {
-        let mut payload = client.build_payload(video_id, visitor_data);
-
-        if let Some(ts) = sts {
-            if let Some(ctx) = payload.get_mut("playbackContext") {
-                if let Some(obj) = ctx.as_object_mut() {
-                    obj.insert(
-                        "contentPlaybackContext".to_string(),
-                        serde_json::json!({ "signatureTimestamp": ts }),
-                    );
-                }
-            } else {
-                payload["playbackContext"] = serde_json::json!({
-                    "contentPlaybackContext": {
-                        "signatureTimestamp": ts
-                    }
-                });
-            }
-        }
+        let payload = client.build_payload(video_id, visitor_data, sts);
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -113,34 +96,50 @@ impl YoutubeExtractor {
     }
 
     async fn fetch_player_js(&self, video_id: &str) -> Option<String> {
-        let embed_url = format!("https://www.youtube.com/embed/{}", video_id);
-        if let Ok(resp) = self.http.get(&embed_url).send().await
-            && let Ok(html) = resp.text().await
-        {
-            let re = Regex::new(r#""(?:PLAYER_JS_URL|jsUrl)":\s*"([^"]+)""#).ok()?;
-            let js_path = re
-                .captures(&html)
-                .and_then(|c| c.get(1))
-                .map(|m| m.as_str())
-                .or_else(|| {
-                    let re2 = Regex::new(r#"src="(/s/player/[^"]+/base\.js)""#).ok()?;
-                    re2.captures(&html)
-                        .and_then(|c| c.get(1))
-                        .map(|m| m.as_str())
-                })?;
+        let sources = [
+            format!("https://www.youtube.com/embed/{}", video_id),
+            format!("https://www.youtube.com/watch?v={}", video_id),
+            "https://www.youtube.com/iframe_api".to_string(),
+        ];
 
-            let full_url = if js_path.starts_with("http") {
-                js_path.to_string()
-            } else {
-                format!("https://www.youtube.com{}", js_path)
-            };
+        let js_patterns = [
+            r#""(?:PLAYER_JS_URL|jsUrl)":\s*"([^"]+)""#,
+            r#"src="(/s/player/[^"]+/(?:base|player_ias)\.js)""#,
+            r#"(/s/player/[a-zA-Z0-9_-]+/player_ias\.vflset/[a-zA-Z0-9_/-]+/base\.js)"#,
+            r#""jsUrl":\s*"([^"]+)""#,
+        ];
 
-            if let Ok(js_resp) = self.http.get(&full_url).send().await
-                && let Ok(js_content) = js_resp.text().await
+        for page_url in sources {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                USER_AGENT,
+                HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"),
+            );
+
+            if let Ok(resp) = self.http.get(&page_url).headers(headers).send().await
+                && let Ok(html) = resp.text().await
             {
-                return Some(js_content);
+                for pat in js_patterns {
+                    if let Ok(re) = Regex::new(pat)
+                        && let Some(cap) = re.captures(&html)
+                        && let Some(js_path) = cap.get(1).map(|m| m.as_str())
+                    {
+                        let full_url = if js_path.starts_with("http") {
+                            js_path.to_string()
+                        } else {
+                            format!("https://www.youtube.com{}", js_path)
+                        };
+
+                        if let Ok(js_resp) = self.http.get(&full_url).send().await
+                            && let Ok(js_content) = js_resp.text().await
+                        {
+                            return Some(js_content);
+                        }
+                    }
+                }
             }
         }
+
         None
     }
 }
@@ -172,9 +171,12 @@ impl Extractor for YoutubeExtractor {
         let mut visitor_data_token: Option<String> = None;
 
         let mut solver = JsChallengeSolver::new();
-        let mut player_js_opt = None;
+        let mut player_js_opt = self.fetch_player_js(video_id.as_str()).await;
+        if let Some(ref js) = player_js_opt {
+            let _ = solver.parse_player_js(js);
+        }
 
-        // 1. Query Innertube multi-clients (14 clients) with fallback
+        // 1. Query Innertube multi-clients (14 clients) to collect all progressive and adaptive formats
         for &client in InnertubeClientKind::all() {
             if let Ok(val) = self
                 .fetch_innertube(
@@ -278,7 +280,11 @@ impl Extractor for YoutubeExtractor {
                     }
 
                     // Extract formats from streamingData
-                    let client_formats = YoutubeParser::parse_player_response(&val, Some(&solver));
+                    let client_formats = YoutubeParser::parse_player_response(
+                        &val,
+                        Some(client.user_agent()),
+                        Some(&solver),
+                    );
                     for mut f in client_formats {
                         if !seen_itags.contains(&f.itag) {
                             seen_itags.insert(f.itag);
@@ -320,7 +326,8 @@ impl Extractor for YoutubeExtractor {
                         }
                     }
 
-                    if !formats.is_empty() {
+                    // Once we have a comprehensive set of adaptive streams, we can stop querying additional clients
+                    if formats.len() >= 15 {
                         break;
                     }
                 }
