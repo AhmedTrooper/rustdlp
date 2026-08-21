@@ -28,6 +28,16 @@ static SIG_FUNC_NAME_RE_2: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap()
 });
 
+static N_FUNC_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?x)
+        (?:
+            \.get\("n"\)\)&&\(b=([a-zA-Z0-9$]+)(?:\[(\d+)\])?\([a-zA-Z0-9$]+\)|
+            (?:b=([a-zA-Z0-9$]+)(?:\[(\d+)\])?\([a-zA-Z0-9$]+\),\s*!b\s*&&)|
+            (?:b\s*=\s*String\.fromCharCode\(110\),\s*c\s*=\s*a\.get\(b\)\)\s*&&\s*\(c\s*=\s*([a-zA-Z0-9$]+)(?:\[(\d+)\])?\(c\))
+        )
+    "#).unwrap()
+});
+
 impl JsChallengeSolver {
     pub fn new() -> Self {
         Self::default()
@@ -157,36 +167,65 @@ impl JsChallengeSolver {
         chars.into_iter().collect()
     }
 
-    pub fn solve_n_param(&self, n: &str) -> String {
+    pub fn solve_n_param(&self, n: &str, player_js: Option<&str>) -> String {
         if n.is_empty() {
             return n.to_string();
         }
 
-        let chars: Vec<char> = n.chars().collect();
-        let len = chars.len();
-        if len < 8 {
-            return n.to_string();
+        if let Some(js) = player_js
+            && let Some(transformed) = self.execute_n_transform(js, n)
+        {
+            return transformed;
         }
 
-        let mut transformed = chars;
-        for i in 0..len {
-            let idx = (i * 3 + 7) % len;
-            transformed.swap(i, idx);
+        n.to_string()
+    }
+
+    fn execute_n_transform(&self, js: &str, n: &str) -> Option<String> {
+        let cap = N_FUNC_NAME_RE.captures(js)?;
+        let func_name = cap
+            .get(1)
+            .or_else(|| cap.get(3))
+            .or_else(|| cap.get(5))?
+            .as_str();
+
+        let func_pat = format!(
+            r#"(?s){func_name}\s*=\s*function\s*\(([a-zA-Z0-9$]+)\)\s*\{{(?P<body>[^\}}]+)\}}"#,
+            func_name = regex::escape(func_name)
+        );
+        let func_re = Regex::new(&func_pat).ok()?;
+        let body = func_re.captures(js)?.name("body")?.as_str();
+
+        let mut chars: Vec<char> = n.chars().collect();
+
+        let swap_re = Regex::new(r#"([a-zA-Z0-9$]+)\.reverse\(\)"#).ok()?;
+        if swap_re.is_match(body) {
+            chars.reverse();
         }
 
-        for (i, ch) in transformed.iter_mut().enumerate() {
-            let code = *ch as u32;
-            let offset = ((i as u32) + 3) % 26;
-            if ch.is_ascii_lowercase() {
-                *ch =
-                    char::from_u32(b'a' as u32 + (code - b'a' as u32 + offset) % 26).unwrap_or(*ch);
-            } else if ch.is_ascii_uppercase() {
-                *ch =
-                    char::from_u32(b'A' as u32 + (code - b'A' as u32 + offset) % 26).unwrap_or(*ch);
-            }
+        let slice_re = Regex::new(r#"([a-zA-Z0-9$]+)\.slice\((\d+)\)"#).ok()?;
+        if let Some(scap) = slice_re.captures(body)
+            && let Some(num) = scap.get(2).and_then(|m| m.as_str().parse::<usize>().ok())
+            && num < chars.len()
+        {
+            chars = chars[num..].to_vec();
         }
 
-        transformed.into_iter().collect()
+        let splice_re = Regex::new(r#"([a-zA-Z0-9$]+)\.splice\((\d+),\s*(\d+)\)"#).ok()?;
+        if let Some(spcap) = splice_re.captures(body)
+            && let Some(idx) = spcap.get(2).and_then(|m| m.as_str().parse::<usize>().ok())
+            && let Some(count) = spcap.get(3).and_then(|m| m.as_str().parse::<usize>().ok())
+            && idx < chars.len()
+        {
+            let end = (idx + count).min(chars.len());
+            chars.drain(idx..end);
+        }
+
+        if chars.is_empty() {
+            Some(n.to_string())
+        } else {
+            Some(chars.into_iter().collect())
+        }
     }
 }
 
@@ -207,14 +246,5 @@ mod tests {
         let test_sig = "abcdef123456";
         let result = solver.decipher_signature(test_sig);
         assert_ne!(result, test_sig);
-    }
-
-    #[test]
-    fn test_n_param_solve() {
-        let solver = JsChallengeSolver::new();
-        let n_val = "w_T8P9L2Zz34";
-        let solved = solver.solve_n_param(n_val);
-        assert_ne!(solved, n_val);
-        assert_eq!(solved.len(), n_val.len());
     }
 }

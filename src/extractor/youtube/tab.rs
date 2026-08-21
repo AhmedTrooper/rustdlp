@@ -60,7 +60,7 @@ impl YoutubeTabExtractor {
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        let (browse_id, params, tab_id) = self.resolve_tab_endpoint(url);
+        let (browse_id, params, tab_id) = self.resolve_tab_endpoint(url).await;
 
         let mut payload = json!({
             "context": {
@@ -147,7 +147,7 @@ impl YoutubeTabExtractor {
         })
     }
 
-    fn resolve_tab_endpoint(&self, url: &str) -> (String, Option<String>, String) {
+    async fn resolve_tab_endpoint(&self, url: &str) -> (String, Option<String>, String) {
         if let Some(pl_id) = extract_playlist_id(url) {
             let browse_id = if pl_id.starts_with("VL") {
                 pl_id.clone()
@@ -170,24 +170,35 @@ impl YoutubeTabExtractor {
                 return (cid.as_str().to_string(), params, cid.as_str().to_string());
             }
 
+            // Resolve handle or custom user via navigation/resolve_url API
+            let resolve_payload = json!({
+                "context": {
+                    "client": {
+                        "clientName": "WEB",
+                        "clientVersion": "2.20260708.00.00",
+                        "hl": "en",
+                        "gl": "US"
+                    }
+                },
+                "url": url
+            });
+
+            if let Ok(resp) = self
+                .http
+                .post("https://www.youtube.com/youtubei/v1/navigation/resolve_url")
+                .json(&resolve_payload)
+                .send()
+                .await
+                && let Ok(val) = resp.json::<Value>().await
+                && let Some(bid) = val
+                    .pointer("/endpoint/browseEndpoint/browseId")
+                    .and_then(|v| v.as_str())
+            {
+                return (bid.to_string(), params, bid.to_string());
+            }
+
             if let Some(h) = cap.name("handle") {
                 return (h.as_str().to_string(), params, h.as_str().to_string());
-            }
-
-            if let Some(custom) = cap.name("custom") {
-                return (
-                    format!("c/{}", custom.as_str()),
-                    params,
-                    custom.as_str().to_string(),
-                );
-            }
-
-            if let Some(user) = cap.name("user") {
-                return (
-                    format!("user/{}", user.as_str()),
-                    params,
-                    user.as_str().to_string(),
-                );
             }
         }
 

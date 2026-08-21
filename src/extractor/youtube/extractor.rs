@@ -10,6 +10,7 @@ use crate::extractor::youtube::url::{extract_youtube_video_id, is_youtube_url};
 use crate::models::format::StreamFormat;
 use crate::models::video::VideoMetadata;
 use async_trait::async_trait;
+use regex::Regex;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -92,6 +93,38 @@ impl YoutubeExtractor {
         let val: Value = response.json().await?;
         Ok(val)
     }
+
+    async fn fetch_player_js(&self, video_id: &str) -> Option<String> {
+        let embed_url = format!("https://www.youtube.com/embed/{}", video_id);
+        if let Ok(resp) = self.http.get(&embed_url).send().await
+            && let Ok(html) = resp.text().await
+        {
+            let re = Regex::new(r#""(?:PLAYER_JS_URL|jsUrl)":\s*"([^"]+)""#).ok()?;
+            let js_path = re
+                .captures(&html)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str())
+                .or_else(|| {
+                    let re2 = Regex::new(r#"src="(/s/player/[^"]+/base\.js)""#).ok()?;
+                    re2.captures(&html)
+                        .and_then(|c| c.get(1))
+                        .map(|m| m.as_str())
+                })?;
+
+            let full_url = if js_path.starts_with("http") {
+                js_path.to_string()
+            } else {
+                format!("https://www.youtube.com{}", js_path)
+            };
+
+            if let Ok(js_resp) = self.http.get(&full_url).send().await
+                && let Ok(js_content) = js_resp.text().await
+            {
+                return Some(js_content);
+            }
+        }
+        None
+    }
 }
 
 #[async_trait]
@@ -120,7 +153,8 @@ impl Extractor for YoutubeExtractor {
         let mut rich_meta = None;
         let mut visitor_data_token: Option<String> = None;
 
-        let solver = JsChallengeSolver::new();
+        let mut solver = JsChallengeSolver::new();
+        let mut player_js_opt = None;
 
         // 1. Query Innertube multi-clients (14 clients)
         for &client in InnertubeClientKind::all() {
@@ -201,6 +235,25 @@ impl Extractor for YoutubeExtractor {
                         rich_meta = Some(YoutubeMetadataParser::parse(&val, None));
                     }
 
+                    // Check if signatureCipher is present in raw formats
+                    let needs_js_solver = val
+                        .pointer("/streamingData/adaptiveFormats")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter().any(|f| {
+                                f.get("signatureCipher").is_some() || f.get("cipher").is_some()
+                            })
+                        })
+                        .unwrap_or(false);
+
+                    if needs_js_solver
+                        && player_js_opt.is_none()
+                        && let Some(js) = self.fetch_player_js(video_id.as_str()).await
+                    {
+                        let _ = solver.parse_player_js(&js);
+                        player_js_opt = Some(js);
+                    }
+
                     // Extract formats from streamingData
                     let client_formats = YoutubeParser::parse_player_response(&val, Some(&solver));
                     for mut f in client_formats {
@@ -215,7 +268,7 @@ impl Extractor for YoutubeExtractor {
                                     .collect();
                                 for (k, v) in &mut query_pairs {
                                     if k == "n" {
-                                        *v = solver.solve_n_param(v);
+                                        *v = solver.solve_n_param(v, player_js_opt.as_deref());
                                     }
                                 }
                                 parsed_url.query_pairs_mut().clear().extend_pairs(

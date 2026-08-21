@@ -23,7 +23,7 @@ pub struct StoryboardSpec {
 pub struct YoutubeRichMetadata {
     pub chapters: Vec<Chapter>,
     pub storyboards: Vec<StoryboardSpec>,
-    pub heatmaps: Vec<(f64, f64)>, // (start_seconds, normalized_0_to_100_intensity)
+    pub heatmaps: Vec<(f64, f64)>, // (start_seconds, 0_to_100_percent_intensity)
     pub subtitles: Vec<SubtitleTrack>,
     pub tags: Vec<String>,
     pub categories: Vec<String>,
@@ -157,10 +157,7 @@ impl YoutubeMetadataParser {
             }
         }
 
-        // 4. Parse Heatmaps with 0-100 Normalization (_video.py:3768)
-        let mut raw_heatmaps: Vec<(f64, f64)> = Vec::new();
-        let mut max_intensity: f64 = 0.0;
-
+        // 4. Parse Heatmaps (_video.py:2364)
         if let Some(markers_map) = val
             .pointer("/frameworkUpdates/entityBatchUpdate/mutations")
             .and_then(|v| v.as_array())
@@ -180,23 +177,11 @@ impl YoutubeMetadataParser {
                                 .get("intensityScoreNormalized")
                                 .and_then(|v| v.as_f64()),
                         ) {
-                            if intensity > max_intensity {
-                                max_intensity = intensity;
-                            }
-                            raw_heatmaps.push((time_frac / 1000.0, intensity));
+                            meta.heatmaps.push((time_frac / 1000.0, intensity * 100.0));
                         }
                     }
                 }
             }
-        }
-
-        for (t, raw_i) in raw_heatmaps {
-            let normalized = if max_intensity > 0.0 {
-                (raw_i / max_intensity) * 100.0
-            } else {
-                raw_i * 100.0
-            };
-            meta.heatmaps.push((t, normalized));
         }
 
         // 5. Subscriber Count & Verification Badges

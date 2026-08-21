@@ -188,8 +188,21 @@ async fn process_single_video(
     if args.write_subs || args.write_auto_subs || args.embed_subs {
         let sub_downloader = SubtitleDownloader::new(http_client.clone());
         let langs: Vec<&str> = args.sub_lang.split(',').map(|s| s.trim()).collect();
+        let mut all_tracks = metadata.subtitles.clone();
+        if let Some(base_track) = metadata.subtitles.first() {
+            let target_langs = [
+                ("es", "Spanish"),
+                ("fr", "French"),
+                ("de", "German"),
+                ("zh", "Chinese"),
+                ("ja", "Japanese"),
+            ];
+            let translated =
+                SubtitleDownloader::generate_translated_tracks(base_track, &target_langs);
+            all_tracks.extend(translated);
+        }
 
-        for track in &metadata.subtitles {
+        for track in &all_tracks {
             if !args.write_auto_subs && track.is_auto_generated && !args.write_subs {
                 continue;
             }

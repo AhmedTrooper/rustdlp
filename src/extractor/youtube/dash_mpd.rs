@@ -224,7 +224,7 @@ mod tests {
         let sample_mpd = r#"<?xml version="1.0" encoding="UTF-8"?>
         <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" minBufferTime="PT1.5S" type="static">
             <Period>
-                <AdaptationSet mimeType="video/mp4" codecs="avc1.640028" frameRate="25" width="1920" height="1080">
+                <AdaptationSet mimeType="video/mp4" codecs="avc1.640028" frameRate="24000/1001" width="1920" height="1080">
                     <Representation id="137" bandwidth="3123456">
                         <BaseURL>https://example.com/video137.mp4</BaseURL>
                     </Representation>
@@ -242,7 +242,7 @@ mod tests {
         assert_eq!(formats.len(), 2);
         let video = formats.iter().find(|f| f.is_video_only()).unwrap();
         assert_eq!(video.resolution.height, Some(1080));
-        assert_eq!(video.fps, Some(25));
+        assert_eq!(video.fps, Some(24));
         assert_eq!(video.vcodec.as_deref(), Some("avc1.640028"));
 
         let audio = formats.iter().find(|f| f.is_audio_only()).unwrap();
