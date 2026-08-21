@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InnertubeClientKind {
@@ -137,12 +137,7 @@ impl InnertubeClientKind {
         }
     }
 
-    pub fn build_payload(
-        &self,
-        video_id: &str,
-        visitor_data: Option<&str>,
-        sts: Option<u64>,
-    ) -> Value {
+    pub fn build_payload(&self, video_id: &str, visitor_data: Option<&str>, sts: Option<u64>) -> Value {
         let mut client_obj = json!({
             "clientName": self.client_name(),
             "clientVersion": self.client_version(),
