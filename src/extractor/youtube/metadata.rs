@@ -23,7 +23,7 @@ pub struct StoryboardSpec {
 pub struct YoutubeRichMetadata {
     pub chapters: Vec<Chapter>,
     pub storyboards: Vec<StoryboardSpec>,
-    pub heatmaps: Vec<(f64, f64)>, // (normalized_start_time, intensity)
+    pub heatmaps: Vec<(f64, f64)>, // (start_seconds, normalized_0_to_100_intensity)
     pub subtitles: Vec<SubtitleTrack>,
     pub tags: Vec<String>,
     pub categories: Vec<String>,
@@ -74,17 +74,24 @@ impl YoutubeMetadataParser {
         }
 
         // 2. Parse Chapters
-        if let Some(markers) = val.pointer("/playerOverlays/playerOverlayRenderer/decoratedPlayerBarRenderer/decoratedPlayerBarRenderer/playerBar/multiMarkersPlayerBarRenderer/markersMap").and_then(|v| v.as_array()) {
+        if let Some(markers) = val
+            .pointer("/playerOverlays/playerOverlayRenderer/decoratedPlayerBarRenderer/decoratedPlayerBarRenderer/playerBar/multiMarkersPlayerBarRenderer/markersMap")
+            .and_then(|v| v.as_array())
+        {
             for marker_group in markers {
                 if let Some(chapter_list) = marker_group.pointer("/value/chapters").and_then(|v| v.as_array()) {
                     for ch in chapter_list {
                         let renderer = ch.get("chapterRenderer").unwrap_or(ch);
-                        let title = renderer.pointer("/title/simpleText")
+                        let title = renderer
+                            .pointer("/title/simpleText")
                             .or_else(|| renderer.pointer("/title/runs/0/text"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("Chapter")
                             .to_string();
-                        let start_ms = renderer.get("timeRangeStartMillis").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let start_ms = renderer
+                            .get("timeRangeStartMillis")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
                         meta.chapters.push(Chapter {
                             title,
                             start_time: (start_ms as f64) / 1000.0,
@@ -150,7 +157,10 @@ impl YoutubeMetadataParser {
             }
         }
 
-        // 4. Parse Heatmaps (Most Replayed Markers)
+        // 4. Parse Heatmaps with 0-100 Normalization (_video.py:3768)
+        let mut raw_heatmaps: Vec<(f64, f64)> = Vec::new();
+        let mut max_intensity: f64 = 0.0;
+
         if let Some(markers_map) = val
             .pointer("/frameworkUpdates/entityBatchUpdate/mutations")
             .and_then(|v| v.as_array())
@@ -170,14 +180,53 @@ impl YoutubeMetadataParser {
                                 .get("intensityScoreNormalized")
                                 .and_then(|v| v.as_f64()),
                         ) {
-                            meta.heatmaps.push((time_frac / 1000.0, intensity));
+                            if intensity > max_intensity {
+                                max_intensity = intensity;
+                            }
+                            raw_heatmaps.push((time_frac / 1000.0, intensity));
                         }
                     }
                 }
             }
         }
 
-        // 5. Tags & Categories
+        for (t, raw_i) in raw_heatmaps {
+            let normalized = if max_intensity > 0.0 {
+                (raw_i / max_intensity) * 100.0
+            } else {
+                raw_i * 100.0
+            };
+            meta.heatmaps.push((t, normalized));
+        }
+
+        // 5. Subscriber Count & Verification Badges
+        meta.subscriber_count = val.pointer("/contents/twoColumnWatchNextResults/results/results/contents/1/videoSecondaryInfoRenderer/owner/videoOwnerRenderer/subscriberCountText/simpleText")
+            .or_else(|| val.pointer("/contents/twoColumnWatchNextResults/results/results/contents/1/videoSecondaryInfoRenderer/owner/videoOwnerRenderer/subscriberCountText/runs/0/text"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        if let Some(badges) = val.pointer("/contents/twoColumnWatchNextResults/results/results/contents/1/videoSecondaryInfoRenderer/owner/videoOwnerRenderer/badges").and_then(|v| v.as_array()) {
+            for b in badges {
+                if let Some(style) = b.pointer("/metadataBadgeRenderer/style").and_then(|v| v.as_str())
+                    && style.contains("VERIFIED")
+                {
+                    meta.is_verified = true;
+                    break;
+                }
+            }
+        }
+
+        // 6. Like Count (from JSON)
+        meta.like_count = val.pointer("/videoDetails/likeCount")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<u64>().ok())
+            .or_else(|| {
+                val.pointer("/contents/twoColumnWatchNextResults/results/results/contents/0/videoPrimaryInfoRenderer/videoActions/menuRenderer/topLevelButtons/0/segmentedLikeDislikeButtonViewModel/likeButtonViewModel/likeButtonViewModel/toggleButtonViewModel/toggleButtonViewModel/defaultButtonViewModel/buttonViewModel/title")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.replace(',', "").parse::<u64>().ok())
+            });
+
+        // 7. Tags & Categories
         if let Some(keywords) = val
             .pointer("/videoDetails/keywords")
             .and_then(|v| v.as_array())
@@ -205,8 +254,10 @@ impl YoutubeMetadataParser {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
 
-        // 6. HTML markers (if available)
-        if let Some(page) = html {
+        // Fallback: HTML markers
+        if meta.like_count.is_none()
+            && let Some(page) = html
+        {
             let likes_re = Regex::new(r#""label":"([0-9,]+)\s+likes"#).unwrap();
             if let Some(cap) = likes_re.captures(page)
                 && let Some(m) = cap.get(1)

@@ -1,12 +1,16 @@
 use crate::core::error::{DlpError, Result};
+use crate::extractor::youtube::jsc::JsChallengeSolver;
 use std::collections::HashMap;
 use url::Url;
 
 pub struct CipherHelper;
 
 impl CipherHelper {
-    /// Parses a `signatureCipher` query string into url and signature
-    pub fn parse_signature_cipher(cipher_str: &str) -> Result<String> {
+    /// Parses a `signatureCipher` query string, applies JS deciphering if solver provided, and returns the stream URL
+    pub fn parse_signature_cipher(
+        cipher_str: &str,
+        solver: Option<&JsChallengeSolver>,
+    ) -> Result<String> {
         let mut params = HashMap::new();
         for pair in cipher_str.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
@@ -24,10 +28,15 @@ impl CipherHelper {
         let sp = params.get("sp").map(|s| s.as_str()).unwrap_or("sig");
 
         if let Some(s) = sig {
-            // Append signature to URL
+            let deciphered_sig = if let Some(sol) = solver {
+                sol.decipher_signature(s)
+            } else {
+                s.to_string()
+            };
+
             let mut url = Url::parse(base_url)
                 .map_err(|e| DlpError::CipherError(format!("Invalid URL in cipher: {}", e)))?;
-            url.query_pairs_mut().append_pair(sp, s);
+            url.query_pairs_mut().append_pair(sp, &deciphered_sig);
             Ok(url.to_string())
         } else {
             Ok(base_url.to_string())
@@ -35,7 +44,6 @@ impl CipherHelper {
     }
 }
 
-// Minimal urlencoding fallback module
 mod urlencoding {
     use std::borrow::Cow;
 

@@ -5,17 +5,16 @@ use std::sync::LazyLock;
 use url::Url;
 
 static YOUTUBE_VIDEO_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?x)
+    Regex::new(r"(?x)
         (?:https?://)?
         (?:
-            (?:www|m|music)\.youtube\.com/(?:watch\?.*?\bv=|embed/|v/|shorts/|live/|clip/)|
-            youtu\.be/
+            (?:www|m|music|gaming)\.(?:youtube|youtube-nocookie)\.com/(?:watch\?.*?\bv=|embed/|v/|e/|shorts/|live/|clip/|movie/)|
+            youtu\.be/|
+            (?:www\.)?youtube\.googleapis\.com/v/|
+            (?:www\.)?(?:hooktube|pwnyoutube|vid\.plus|inv\.tux\.pizza|yewtu\.be|invidious\.[a-z.]+)/(?:watch\?.*?\bv=|embed/|v/|shorts/)
         )
         (?P<id>[a-zA-Z0-9_-]{11})
-    ",
-    )
-    .unwrap()
+    ").unwrap()
 });
 
 pub fn extract_youtube_video_id(input: &str) -> Result<VideoId> {
@@ -40,7 +39,11 @@ pub fn extract_youtube_video_id(input: &str) -> Result<VideoId> {
         }
 
         if let Some(domain) = parsed.domain()
-            && (domain.contains("youtube.com") || domain.contains("youtu.be"))
+            && (domain.contains("youtube.com")
+                || domain.contains("youtu.be")
+                || domain.contains("youtube-nocookie.com")
+                || domain.contains("hooktube")
+                || domain.contains("invidious"))
         {
             let segments: Vec<&str> = parsed
                 .path_segments()
@@ -59,6 +62,9 @@ pub fn is_youtube_url(input: &str) -> bool {
     extract_youtube_video_id(input).is_ok()
         || input.contains("youtube.com")
         || input.contains("youtu.be")
+        || input.contains("youtube-nocookie.com")
+        || input.contains("hooktube.com")
+        || input.contains("invidious")
 }
 
 pub fn extract_playlist_id(url: &str) -> Option<String> {
@@ -91,6 +97,18 @@ mod tests {
         );
         assert_eq!(
             extract_youtube_video_id("https://music.youtube.com/watch?v=dQw4w9WgXcQ")
+                .unwrap()
+                .as_str(),
+            "dQw4w9WgXcQ"
+        );
+        assert_eq!(
+            extract_youtube_video_id("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ")
+                .unwrap()
+                .as_str(),
+            "dQw4w9WgXcQ"
+        );
+        assert_eq!(
+            extract_youtube_video_id("https://hooktube.com/watch?v=dQw4w9WgXcQ")
                 .unwrap()
                 .as_str(),
             "dQw4w9WgXcQ"

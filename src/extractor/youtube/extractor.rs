@@ -122,7 +122,7 @@ impl Extractor for YoutubeExtractor {
 
         let solver = JsChallengeSolver::new();
 
-        // 1. Query Innertube multi-clients
+        // 1. Query Innertube multi-clients (14 clients)
         for &client in InnertubeClientKind::all() {
             if let Ok(val) = self
                 .fetch_innertube(client, video_id.as_str(), visitor_data_token.as_deref())
@@ -202,7 +202,7 @@ impl Extractor for YoutubeExtractor {
                     }
 
                     // Extract formats from streamingData
-                    let client_formats = YoutubeParser::parse_player_response(&val);
+                    let client_formats = YoutubeParser::parse_player_response(&val, Some(&solver));
                     for mut f in client_formats {
                         if !seen_itags.contains(&f.itag) {
                             seen_itags.insert(f.itag);

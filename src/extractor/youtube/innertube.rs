@@ -6,13 +6,16 @@ pub enum InnertubeClientKind {
     WebSafari,
     WebEmbedded,
     WebMusic,
+    WebCreator,
     Android,
     AndroidVr,
+    AndroidTestSuite,
     Ios,
     VisionOs,
     MWeb,
     Tv,
     TvEmbedded,
+    TvDowngraded,
 }
 
 impl InnertubeClientKind {
@@ -25,10 +28,13 @@ impl InnertubeClientKind {
             InnertubeClientKind::WebSafari,
             InnertubeClientKind::WebEmbedded,
             InnertubeClientKind::WebMusic,
+            InnertubeClientKind::WebCreator,
             InnertubeClientKind::AndroidVr,
+            InnertubeClientKind::AndroidTestSuite,
             InnertubeClientKind::MWeb,
             InnertubeClientKind::Tv,
             InnertubeClientKind::TvEmbedded,
+            InnertubeClientKind::TvDowngraded,
         ]
     }
 
@@ -38,13 +44,16 @@ impl InnertubeClientKind {
             Self::WebSafari => "WEB",
             Self::WebEmbedded => "WEB_EMBEDDED_PLAYER",
             Self::WebMusic => "WEB_REMIX",
+            Self::WebCreator => "WEB_CREATOR",
             Self::Android => "ANDROID",
             Self::AndroidVr => "ANDROID_VR",
+            Self::AndroidTestSuite => "ANDROID_TESTSUITE",
             Self::Ios => "IOS",
             Self::VisionOs => "VISIONOS",
             Self::MWeb => "MWEB",
             Self::Tv => "TVHTML5",
             Self::TvEmbedded => "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+            Self::TvDowngraded => "TV_DOWNGRADED",
         }
     }
 
@@ -52,13 +61,16 @@ impl InnertubeClientKind {
         match self {
             Self::Web | Self::WebSafari | Self::WebEmbedded => "2.20260708.00.00",
             Self::WebMusic => "1.20260707.12.00",
+            Self::WebCreator => "1.20260708.01.00",
             Self::Android => "21.26.364",
             Self::AndroidVr => "1.65.10",
+            Self::AndroidTestSuite => "1.9.0",
             Self::Ios => "21.26.4",
             Self::VisionOs => "1.02",
             Self::MWeb => "2.20260708.05.00",
             Self::Tv => "7.20260707.08.00",
             Self::TvEmbedded => "2.0",
+            Self::TvDowngraded => "6.20240101.00.00",
         }
     }
 
@@ -70,10 +82,13 @@ impl InnertubeClientKind {
             Self::AndroidVr => "28",
             Self::WebEmbedded => "56",
             Self::WebMusic => "67",
+            Self::WebCreator => "62",
             Self::VisionOs => "101",
             Self::MWeb => "65",
             Self::Tv => "31",
             Self::TvEmbedded => "85",
+            Self::AndroidTestSuite => "89",
+            Self::TvDowngraded => "31",
         }
     }
 
@@ -91,9 +106,15 @@ impl InnertubeClientKind {
             Self::WebMusic => {
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"
             }
+            Self::WebCreator => {
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+            }
             Self::Android => "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
             Self::AndroidVr => {
                 "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+            }
+            Self::AndroidTestSuite => {
+                "google/coral/coral:10/QQ3A.200805.001/6578210:user/release-keys"
             }
             Self::Ios => {
                 "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
@@ -109,6 +130,9 @@ impl InnertubeClientKind {
             }
             Self::TvEmbedded => {
                 "Mozilla/5.0 (ChromiumStylePlatform; Linux x86_64; GoogleTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            Self::TvDowngraded => {
+                "Mozilla/5.0 (ChromiumStylePlatform; Linux x86_64; GoogleTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
             }
         }
     }
@@ -126,7 +150,7 @@ impl InnertubeClientKind {
         }
 
         match self {
-            Self::Android => {
+            Self::Android | Self::AndroidTestSuite => {
                 client_obj["androidSdkVersion"] = json!(30);
                 client_obj["osName"] = json!("Android");
                 client_obj["osVersion"] = json!("11");

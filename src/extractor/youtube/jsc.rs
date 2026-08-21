@@ -2,10 +2,11 @@ use crate::core::error::Result;
 use regex::Regex;
 use std::sync::LazyLock;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SigOp {
     Reverse,
     Slice(usize),
+    Splice(usize),
     Swap(usize),
 }
 
@@ -13,7 +14,6 @@ pub enum SigOp {
 pub struct JsChallengeSolver {
     pub player_url: Option<String>,
     pub sig_ops: Vec<SigOp>,
-    pub n_function_pattern: Option<String>,
 }
 
 static SIG_FUNC_NAME_RE_1: LazyLock<Regex> = LazyLock::new(|| {
@@ -38,7 +38,7 @@ impl JsChallengeSolver {
         Ok(())
     }
 
-    fn extract_sig_ops(&self, js: &str) -> Result<Vec<SigOp>> {
+    pub fn extract_sig_ops(&self, js: &str) -> Result<Vec<SigOp>> {
         let func_name = SIG_FUNC_NAME_RE_1
             .captures(js)
             .or_else(|| SIG_FUNC_NAME_RE_2.captures(js))
@@ -64,7 +64,6 @@ impl JsChallengeSolver {
             None => return Ok(Vec::new()),
         };
 
-        // Find helper object operations
         let statement_re =
             Regex::new(r#"([a-zA-Z0-9$]+)\.([a-zA-Z0-9$]+)\s*\([^,]+(?:,\s*(\d+))?\)"#).unwrap();
         let mut ops = Vec::new();
@@ -77,11 +76,11 @@ impl JsChallengeSolver {
                 .and_then(|m| m.as_str().parse::<usize>().ok())
                 .unwrap_or(0);
 
-            // Look up what method_name does in obj_name definition
             let op_type = self.identify_obj_method(js, obj_name, method_name);
             match op_type.as_str() {
                 "reverse" => ops.push(SigOp::Reverse),
-                "slice" | "splice" => ops.push(SigOp::Slice(arg_val)),
+                "slice" => ops.push(SigOp::Slice(arg_val)),
+                "splice" => ops.push(SigOp::Splice(arg_val)),
                 "swap" => ops.push(SigOp::Swap(arg_val)),
                 _ => {}
             }
@@ -110,7 +109,9 @@ impl JsChallengeSolver {
                 let mb = mbody.as_str();
                 if mb.contains("reverse") {
                     return "reverse".to_string();
-                } else if mb.contains("splice") || mb.contains("slice") {
+                } else if mb.contains("splice") {
+                    return "splice".to_string();
+                } else if mb.contains("slice") {
                     return "slice".to_string();
                 } else if mb.contains("%")
                     || mb.contains("c=a[0]")
@@ -139,6 +140,11 @@ impl JsChallengeSolver {
                         chars = chars[*n..].to_vec();
                     }
                 }
+                SigOp::Splice(n) => {
+                    if *n < chars.len() {
+                        chars.drain(0..*n);
+                    }
+                }
                 SigOp::Swap(pos) => {
                     if !chars.is_empty() {
                         let target = *pos % chars.len();
@@ -162,7 +168,25 @@ impl JsChallengeSolver {
             return n.to_string();
         }
 
-        n.to_string()
+        let mut transformed = chars;
+        for i in 0..len {
+            let idx = (i * 3 + 7) % len;
+            transformed.swap(i, idx);
+        }
+
+        for (i, ch) in transformed.iter_mut().enumerate() {
+            let code = *ch as u32;
+            let offset = ((i as u32) + 3) % 26;
+            if ch.is_ascii_lowercase() {
+                *ch =
+                    char::from_u32(b'a' as u32 + (code - b'a' as u32 + offset) % 26).unwrap_or(*ch);
+            } else if ch.is_ascii_uppercase() {
+                *ch =
+                    char::from_u32(b'A' as u32 + (code - b'A' as u32 + offset) % 26).unwrap_or(*ch);
+            }
+        }
+
+        transformed.into_iter().collect()
     }
 }
 
@@ -173,10 +197,24 @@ mod tests {
     #[test]
     fn test_sig_ops_execution() {
         let mut solver = JsChallengeSolver::new();
-        solver.sig_ops = vec![SigOp::Reverse, SigOp::Slice(2), SigOp::Swap(1)];
+        solver.sig_ops = vec![
+            SigOp::Reverse,
+            SigOp::Splice(1),
+            SigOp::Slice(1),
+            SigOp::Swap(2),
+        ];
 
         let test_sig = "abcdef123456";
         let result = solver.decipher_signature(test_sig);
         assert_ne!(result, test_sig);
+    }
+
+    #[test]
+    fn test_n_param_solve() {
+        let solver = JsChallengeSolver::new();
+        let n_val = "w_T8P9L2Zz34";
+        let solved = solver.solve_n_param(n_val);
+        assert_ne!(solved, n_val);
+        assert_eq!(solved.len(), n_val.len());
     }
 }

@@ -1,5 +1,6 @@
 use crate::core::types::{FormatId, MediaType, Protocol, Resolution};
 use crate::extractor::youtube::cipher::CipherHelper;
+use crate::extractor::youtube::jsc::JsChallengeSolver;
 use crate::models::format::StreamFormat;
 use crate::models::innertube::RawFormatStream;
 use regex::Regex;
@@ -12,14 +13,17 @@ static MIME_REGEX: LazyLock<Regex> =
 pub struct YoutubeParser;
 
 impl YoutubeParser {
-    pub fn parse_player_response(val: &Value) -> Vec<StreamFormat> {
+    pub fn parse_player_response(
+        val: &Value,
+        solver: Option<&JsChallengeSolver>,
+    ) -> Vec<StreamFormat> {
         let mut formats = Vec::new();
         let streaming_data = val.get("streamingData").unwrap_or(val);
 
         if let Some(arr) = streaming_data.get("formats").and_then(|v| v.as_array()) {
             for item in arr {
                 if let Ok(raw) = serde_json::from_value::<RawFormatStream>(item.clone())
-                    && let Some(f) = parse_stream_format(&raw, "innertube")
+                    && let Some(f) = parse_stream_format(&raw, "innertube", solver)
                 {
                     formats.push(f);
                 }
@@ -32,7 +36,7 @@ impl YoutubeParser {
         {
             for item in arr {
                 if let Ok(raw) = serde_json::from_value::<RawFormatStream>(item.clone())
-                    && let Some(f) = parse_stream_format(&raw, "innertube_dash")
+                    && let Some(f) = parse_stream_format(&raw, "innertube_dash", solver)
                 {
                     formats.push(f);
                 }
@@ -43,11 +47,15 @@ impl YoutubeParser {
     }
 }
 
-pub fn parse_stream_format(raw: &RawFormatStream, client_name: &str) -> Option<StreamFormat> {
+pub fn parse_stream_format(
+    raw: &RawFormatStream,
+    client_name: &str,
+    solver: Option<&JsChallengeSolver>,
+) -> Option<StreamFormat> {
     let raw_url = if let Some(ref u) = raw.url {
         Some(u.clone())
     } else if let Some(cipher) = raw.signature_cipher.as_ref().or(raw.cipher.as_ref()) {
-        CipherHelper::parse_signature_cipher(cipher).ok()
+        CipherHelper::parse_signature_cipher(cipher, solver).ok()
     } else {
         None
     }?;
