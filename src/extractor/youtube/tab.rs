@@ -11,7 +11,19 @@ static YOUTUBE_PLAYLIST_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static YOUTUBE_CHANNEL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?:https?://)?(?:www\.)?youtube\.com/(?:(?P<handle>@[^/?#&]+)|channel/(?P<channel_id>UC[0-9A-Za-z_-]{22})|c/(?P<custom>[^/?#&]+)|user/(?P<user>[^/?#&]+))(?:/(?P<tab>videos|shorts|streams|playlists|featured|community))?"#).unwrap()
+    Regex::new(
+        r#"(?x)
+        (?:https?://)?(?:www\.)?youtube\.com/
+        (?:
+            (?P<handle>@[^/?\#&]+)|
+            channel/(?P<channel_id>UC[0-9A-Za-z_-]{22})|
+            c/(?P<custom>[^/?\#&]+)|
+            user/(?P<user>[^/?\#&]+)
+        )
+        (?:/(?P<tab>videos|shorts|streams|playlists|featured|community))?
+    "#,
+    )
+    .unwrap()
 });
 
 pub fn is_youtube_tab_url(url: &str) -> bool {
@@ -60,7 +72,7 @@ impl YoutubeTabExtractor {
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        let (browse_id, params, tab_id) = self.resolve_tab_endpoint(url).await;
+        let (browse_id, params, tab_id) = self.resolve_tab_endpoint(url).await?;
 
         let mut payload = json!({
             "context": {
@@ -147,14 +159,14 @@ impl YoutubeTabExtractor {
         })
     }
 
-    async fn resolve_tab_endpoint(&self, url: &str) -> (String, Option<String>, String) {
+    async fn resolve_tab_endpoint(&self, url: &str) -> Result<(String, Option<String>, String)> {
         if let Some(pl_id) = extract_playlist_id(url) {
             let browse_id = if pl_id.starts_with("VL") {
                 pl_id.clone()
             } else {
                 format!("VL{}", pl_id)
             };
-            return (browse_id, None, pl_id);
+            return Ok((browse_id, None, pl_id));
         }
 
         if let Some(cap) = YOUTUBE_CHANNEL_RE.captures(url) {
@@ -167,7 +179,7 @@ impl YoutubeTabExtractor {
             };
 
             if let Some(cid) = cap.name("channel_id") {
-                return (cid.as_str().to_string(), params, cid.as_str().to_string());
+                return Ok((cid.as_str().to_string(), params, cid.as_str().to_string()));
             }
 
             // Resolve handle or custom user via navigation/resolve_url API
@@ -194,19 +206,22 @@ impl YoutubeTabExtractor {
                     .pointer("/endpoint/browseEndpoint/browseId")
                     .and_then(|v| v.as_str())
             {
-                return (bid.to_string(), params, bid.to_string());
+                return Ok((bid.to_string(), params, bid.to_string()));
             }
 
             if let Some(h) = cap.name("handle") {
-                return (h.as_str().to_string(), params, h.as_str().to_string());
+                return Err(DlpError::ExtractionError(format!(
+                    "Could not resolve YouTube channel handle '{}' to a valid channel ID",
+                    h.as_str()
+                )));
             }
         }
 
-        (
+        Ok((
             "FEwhat_to_watch".to_string(),
             None,
             "youtube_tab".to_string(),
-        )
+        ))
     }
 
     fn parse_tab_json(

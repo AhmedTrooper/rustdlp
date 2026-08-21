@@ -190,16 +190,13 @@ async fn process_single_video(
         let langs: Vec<&str> = args.sub_lang.split(',').map(|s| s.trim()).collect();
         let mut all_tracks = metadata.subtitles.clone();
         if let Some(base_track) = metadata.subtitles.first() {
-            let target_langs = [
-                ("es", "Spanish"),
-                ("fr", "French"),
-                ("de", "German"),
-                ("zh", "Chinese"),
-                ("ja", "Japanese"),
-            ];
-            let translated =
-                SubtitleDownloader::generate_translated_tracks(base_track, &target_langs);
-            all_tracks.extend(translated);
+            for &lang in &langs {
+                if lang != "all" && !all_tracks.iter().any(|t| t.language_code == lang) {
+                    let translated =
+                        SubtitleDownloader::generate_translated_tracks(base_track, &[(lang, lang)]);
+                    all_tracks.extend(translated);
+                }
+            }
         }
 
         for track in &all_tracks {

@@ -177,7 +177,7 @@ impl YoutubeMetadataParser {
                                 .get("intensityScoreNormalized")
                                 .and_then(|v| v.as_f64()),
                         ) {
-                            meta.heatmaps.push((time_frac / 1000.0, intensity * 100.0));
+                            meta.heatmaps.push((time_frac / 1000.0, intensity));
                         }
                     }
                 }
