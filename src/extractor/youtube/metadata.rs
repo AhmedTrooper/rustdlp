@@ -1,0 +1,184 @@
+use crate::models::subtitle::SubtitleTrack;
+use regex::Regex;
+use serde_json::Value;
+
+#[derive(Debug, Clone, Default)]
+pub struct Chapter {
+    pub title: String,
+    pub start_time: f64,
+    pub end_time: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StoryboardSpec {
+    pub url_template: String,
+    pub thumbnail_width: u32,
+    pub thumbnail_height: u32,
+    pub columns: u32,
+    pub rows: u32,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct YoutubeRichMetadata {
+    pub chapters: Vec<Chapter>,
+    pub storyboards: Vec<StoryboardSpec>,
+    pub heatmaps: Vec<(f64, f64)>, // (normalized_start_time, intensity)
+    pub subtitles: Vec<SubtitleTrack>,
+    pub tags: Vec<String>,
+    pub categories: Vec<String>,
+    pub like_count: Option<u64>,
+    pub subscriber_count: Option<String>,
+    pub is_verified: bool,
+}
+
+pub struct YoutubeMetadataParser;
+
+impl YoutubeMetadataParser {
+    pub fn parse(val: &Value, html: Option<&str>) -> YoutubeRichMetadata {
+        let mut meta = YoutubeRichMetadata::default();
+
+        // 1. Parse Subtitles (Manual & ASR TimedText)
+        if let Some(captions) = val
+            .pointer("/captions/playerCaptionsTracklistRenderer/captionTracks")
+            .and_then(|v| v.as_array())
+        {
+            for track in captions {
+                if let Some(base_url) = track.get("baseUrl").and_then(|v| v.as_str()) {
+                    let lang_code = track
+                        .get("languageCode")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("en")
+                        .to_string();
+                    let name = track
+                        .pointer("/name/simpleText")
+                        .or_else(|| track.pointer("/name/runs/0/text"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&lang_code)
+                        .to_string();
+                    let kind = track
+                        .get("kind")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    let is_asr = kind == "asr";
+
+                    meta.subtitles.push(SubtitleTrack {
+                        language_code: lang_code,
+                        name,
+                        base_url: base_url.to_string(),
+                        is_auto_generated: is_asr,
+                    });
+                }
+            }
+        }
+
+        // 2. Parse Chapters
+        if let Some(markers) = val.pointer("/playerOverlays/playerOverlayRenderer/decoratedPlayerBarRenderer/decoratedPlayerBarRenderer/playerBar/multiMarkersPlayerBarRenderer/markersMap").and_then(|v| v.as_array()) {
+            for marker_group in markers {
+                if let Some(chapter_list) = marker_group.pointer("/value/chapters").and_then(|v| v.as_array()) {
+                    for ch in chapter_list {
+                        let renderer = ch.get("chapterRenderer").unwrap_or(ch);
+                        let title = renderer.pointer("/title/simpleText")
+                            .or_else(|| renderer.pointer("/title/runs/0/text"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Chapter")
+                            .to_string();
+                        let start_ms = renderer.get("timeRangeStartMillis").and_then(|v| v.as_u64()).unwrap_or(0);
+                        meta.chapters.push(Chapter {
+                            title,
+                            start_time: (start_ms as f64) / 1000.0,
+                            end_time: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Fallback: description timestamp chapters
+        if meta.chapters.is_empty()
+            && let Some(desc) = val
+                .pointer("/videoDetails/shortDescription")
+                .and_then(|v| v.as_str())
+        {
+            let ts_re =
+                Regex::new(r#"(?m)^\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})\s+[-–—]?\s*(.+)$"#).unwrap();
+            for cap in ts_re.captures_iter(desc) {
+                let hrs = cap
+                    .get(1)
+                    .map(|m| m.as_str().parse::<f64>().unwrap_or(0.0))
+                    .unwrap_or(0.0);
+                let mins = cap
+                    .get(2)
+                    .and_then(|m| m.as_str().parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                let secs = cap
+                    .get(3)
+                    .and_then(|m| m.as_str().parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                let title = cap
+                    .get(4)
+                    .map(|m| m.as_str().trim().to_string())
+                    .unwrap_or_default();
+
+                let total_secs = hrs * 3600.0 + mins * 60.0 + secs;
+                meta.chapters.push(Chapter {
+                    title,
+                    start_time: total_secs,
+                    end_time: None,
+                });
+            }
+        }
+
+        // 3. Parse Storyboards
+        if let Some(spec) = val
+            .pointer("/storyboards/playerStoryboardSpecRenderer/spec")
+            .and_then(|v| v.as_str())
+        {
+            for part in spec.split('|') {
+                let segments: Vec<&str> = part.split('#').collect();
+                if segments.len() >= 5 {
+                    meta.storyboards.push(StoryboardSpec {
+                        url_template: segments[0].to_string(),
+                        thumbnail_width: segments[1].parse().unwrap_or(160),
+                        thumbnail_height: segments[2].parse().unwrap_or(90),
+                        columns: segments[3].parse().unwrap_or(5),
+                        rows: segments[4].parse().unwrap_or(5),
+                        count: segments.get(5).and_then(|s| s.parse().ok()).unwrap_or(25),
+                    });
+                }
+            }
+        }
+
+        // 4. Tags & Categories
+        if let Some(keywords) = val
+            .pointer("/videoDetails/keywords")
+            .and_then(|v| v.as_array())
+        {
+            meta.tags = keywords
+                .iter()
+                .filter_map(|k| k.as_str())
+                .map(|s| s.to_string())
+                .collect();
+        }
+
+        if let Some(cat) = val
+            .pointer("/microformat/playerMicroformatRenderer/category")
+            .and_then(|v| v.as_str())
+        {
+            meta.categories.push(cat.to_string());
+        }
+
+        // 5. HTML markers (if available)
+        if let Some(page) = html {
+            let likes_re = Regex::new(r#""label":"([0-9,]+)\s+likes"#).unwrap();
+            if let Some(cap) = likes_re.captures(page)
+                && let Some(m) = cap.get(1)
+            {
+                let clean = m.as_str().replace(',', "");
+                meta.like_count = clean.parse::<u64>().ok();
+            }
+        }
+
+        meta
+    }
+}

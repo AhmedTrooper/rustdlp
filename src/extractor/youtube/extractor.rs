@@ -1,17 +1,21 @@
 use crate::core::error::{DlpError, Result};
 use crate::core::types::VideoId;
 use crate::extractor::traits::Extractor;
-use crate::extractor::youtube::client::{InnertubeClient, InnertubeClientType};
-use crate::extractor::youtube::parser::parse_stream_format;
-use crate::extractor::youtube::url::extract_video_id;
-use crate::models::innertube::InnertubePlayerResponse;
-use crate::models::subtitle::SubtitleTrack;
+use crate::extractor::youtube::dash_mpd::YoutubeDashMpdParser;
+use crate::extractor::youtube::innertube::InnertubeClientKind;
+use crate::extractor::youtube::jsc::JsChallengeSolver;
+use crate::extractor::youtube::metadata::YoutubeMetadataParser;
+use crate::extractor::youtube::parser::YoutubeParser;
+use crate::extractor::youtube::url::{extract_youtube_video_id, is_youtube_url};
+use crate::models::format::StreamFormat;
 use crate::models::video::VideoMetadata;
 use async_trait::async_trait;
+use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
+use serde_json::Value;
 use std::collections::HashSet;
 
 pub struct YoutubeExtractor {
-    client: InnertubeClient,
+    http: reqwest::Client,
 }
 
 impl Default for YoutubeExtractor {
@@ -23,203 +27,51 @@ impl Default for YoutubeExtractor {
 impl YoutubeExtractor {
     pub fn new() -> Self {
         Self {
-            client: InnertubeClient::new(),
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
     pub fn with_http_client(http: reqwest::Client) -> Self {
-        Self {
-            client: InnertubeClient::with_http(http),
-        }
+        Self { http }
     }
 
     pub async fn extract_by_id(&self, video_id: &VideoId) -> Result<VideoMetadata> {
-        let clients_to_try = [
-            InnertubeClientType::VisionOs,
-            InnertubeClientType::AndroidVr,
-            InnertubeClientType::Android,
-            InnertubeClientType::Ios,
-        ];
+        self.extract(video_id.as_str()).await
+    }
 
-        let mut responses = Vec::new();
-        let mut primary_meta: Option<InnertubePlayerResponse> = None;
+    async fn fetch_innertube(&self, client: InnertubeClientKind, video_id: &str) -> Result<Value> {
+        let payload = client.build_payload(video_id);
 
-        for client_type in clients_to_try {
-            match self.client.fetch_player(video_id, client_type).await {
-                Ok(resp) => {
-                    let status = resp
-                        .playability_status
-                        .as_ref()
-                        .and_then(|s| s.status.as_deref())
-                        .unwrap_or("UNKNOWN");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(client.user_agent())
+                .unwrap_or_else(|_| HeaderValue::from_static("Mozilla/5.0")),
+        );
+        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-                    if status == "OK" {
-                        if primary_meta.is_none() {
-                            primary_meta = Some(resp.clone());
-                        }
-                        responses.push((client_type.name(), resp));
-                    } else if status == "UNPLAYABLE" || status == "ERROR" {
-                        let reason = resp
-                            .playability_status
-                            .as_ref()
-                            .and_then(|s| s.reason.as_deref())
-                            .unwrap_or("Video unavailable");
-                        log::debug!(
-                            "Client {} returned status {}: {}",
-                            client_type.name(),
-                            status,
-                            reason
-                        );
-                    }
-                }
-                Err(e) => {
-                    log::debug!("Client {} error: {}", client_type.name(), e);
-                }
-            }
+        let response = self
+            .http
+            .post("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
+            .headers(headers)
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(DlpError::ExtractionError(format!(
+                "Innertube {} request failed with HTTP {}",
+                client.client_name(),
+                response.status()
+            )));
         }
 
-        let meta = primary_meta.ok_or_else(|| {
-            DlpError::VideoUnavailable(format!(
-                "Could not retrieve video stream metadata for ID: {}",
-                video_id
-            ))
-        })?;
-
-        let details = meta.video_details.as_ref().ok_or_else(|| {
-            DlpError::ExtractionError("Missing videoDetails in player response".into())
-        })?;
-
-        let title = details
-            .title
-            .clone()
-            .unwrap_or_else(|| "Unknown Title".into());
-        let uploader = details
-            .author
-            .clone()
-            .unwrap_or_else(|| "Unknown Uploader".into());
-        let channel_id = details.channel_id.clone();
-        let duration = details
-            .length_seconds
-            .as_deref()
-            .and_then(|s| s.parse::<u64>().ok());
-        let view_count = details
-            .view_count
-            .as_deref()
-            .and_then(|s| s.parse::<u64>().ok());
-        let description = details.short_description.clone();
-        let is_live = details.is_live_content.unwrap_or(false);
-
-        let thumbnails: Vec<String> = details
-            .thumbnail
-            .as_ref()
-            .and_then(|t| t.thumbnails.as_ref())
-            .map(|list| list.iter().map(|item| item.url.clone()).collect())
-            .unwrap_or_default();
-
-        let upload_date = meta
-            .microformat
-            .as_ref()
-            .and_then(|m| m.player_microformat_renderer.as_ref())
-            .and_then(|r| r.upload_date.clone().or_else(|| r.publish_date.clone()));
-
-        // Collect and deduplicate formats across all successful client responses
-        let mut all_formats = Vec::new();
-        let mut seen_itags = HashSet::new();
-        let mut subtitles = Vec::new();
-        let mut seen_subs = HashSet::new();
-
-        for (client_name, resp) in responses {
-            if let Some(streaming_data) = resp.streaming_data {
-                // Progressive formats (combined video + audio)
-                if let Some(formats) = streaming_data.formats {
-                    for raw in formats {
-                        if !seen_itags.contains(&raw.itag)
-                            && let Some(stream_fmt) = parse_stream_format(&raw, client_name)
-                        {
-                            seen_itags.insert(raw.itag);
-                            all_formats.push(stream_fmt);
-                        }
-                    }
-                }
-
-                // Adaptive formats (separate video and audio streams)
-                if let Some(adaptive) = streaming_data.adaptive_formats {
-                    for raw in adaptive {
-                        if !seen_itags.contains(&raw.itag)
-                            && let Some(stream_fmt) = parse_stream_format(&raw, client_name)
-                        {
-                            seen_itags.insert(raw.itag);
-                            all_formats.push(stream_fmt);
-                        }
-                    }
-                }
-            }
-
-            // Extract captions from whichever client returned them
-            if let Some(captions_container) = resp.captions
-                && let Some(renderer) = captions_container.player_captions_tracklist_renderer
-                && let Some(tracks) = renderer.caption_tracks
-            {
-                for track in tracks {
-                    if !seen_subs.contains(&track.language_code) {
-                        seen_subs.insert(track.language_code.clone());
-                        let name = track
-                            .name
-                            .and_then(|n| {
-                                n.simple_text.or_else(|| {
-                                    n.runs.and_then(|r| r.first().map(|tr| tr.text.clone()))
-                                })
-                            })
-                            .unwrap_or_else(|| track.language_code.clone());
-                        let is_auto = track.kind.as_deref() == Some("asr");
-                        subtitles.push(SubtitleTrack {
-                            language_code: track.language_code,
-                            name,
-                            base_url: track.base_url,
-                            is_auto_generated: is_auto,
-                        });
-                    }
-                }
-            }
-        }
-
-        // Sort formats: audio first (by bitrate), then video (by resolution, fps, bitrate), then combined
-        all_formats.sort_by(|a, b| match (a.is_audio_only(), b.is_audio_only()) {
-            (true, true) => a.effective_bitrate().cmp(&b.effective_bitrate()),
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            (false, false) => {
-                let res_cmp = a.height().cmp(&b.height());
-                if res_cmp != std::cmp::Ordering::Equal {
-                    res_cmp
-                } else {
-                    let fps_cmp = a.effective_fps().cmp(&b.effective_fps());
-                    if fps_cmp != std::cmp::Ordering::Equal {
-                        fps_cmp
-                    } else {
-                        a.effective_bitrate().cmp(&b.effective_bitrate())
-                    }
-                }
-            }
-        });
-
-        let webpage_url = format!("https://www.youtube.com/watch?v={}", video_id);
-
-        Ok(VideoMetadata {
-            id: video_id.clone(),
-            title,
-            uploader,
-            channel_id,
-            duration,
-            view_count,
-            description,
-            upload_date,
-            thumbnails,
-            formats: all_formats,
-            subtitles,
-            webpage_url,
-            is_live,
-        })
+        let val: Value = response.json().await?;
+        Ok(val)
     }
 }
 
@@ -230,11 +82,170 @@ impl Extractor for YoutubeExtractor {
     }
 
     fn can_extract(&self, url: &str) -> bool {
-        extract_video_id(url).is_ok()
+        is_youtube_url(url)
     }
 
     async fn extract(&self, url: &str) -> Result<VideoMetadata> {
-        let video_id = extract_video_id(url)?;
-        self.extract_by_id(&video_id).await
+        let video_id = extract_youtube_video_id(url)?;
+        let mut formats: Vec<StreamFormat> = Vec::new();
+        let mut seen_itags = HashSet::new();
+
+        let mut title: Option<String> = None;
+        let mut uploader: Option<String> = None;
+        let mut channel_id: Option<String> = None;
+        let mut duration: Option<u64> = None;
+        let mut view_count: Option<u64> = None;
+        let mut description: Option<String> = None;
+        let mut upload_date: Option<String> = None;
+        let mut thumbnails = Vec::new();
+        let mut rich_meta = None;
+
+        let solver = JsChallengeSolver::new();
+
+        // 1. Query Innertube multi-clients
+        for &client in InnertubeClientKind::all() {
+            if let Ok(val) = self.fetch_innertube(client, video_id.as_str()).await {
+                // Check playability status
+                let playability_status = val
+                    .pointer("/playabilityStatus/status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("OK");
+
+                if playability_status == "OK" {
+                    if title.is_none() {
+                        title = val
+                            .pointer("/videoDetails/title")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                    }
+                    if uploader.is_none() {
+                        uploader = val
+                            .pointer("/videoDetails/author")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                    }
+                    if channel_id.is_none() {
+                        channel_id = val
+                            .pointer("/videoDetails/channelId")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                    }
+                    if duration.is_none() {
+                        duration = val
+                            .pointer("/videoDetails/lengthSeconds")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| s.parse::<u64>().ok());
+                    }
+                    if view_count.is_none() {
+                        view_count = val
+                            .pointer("/videoDetails/viewCount")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| s.parse::<u64>().ok());
+                    }
+                    if description.is_none() {
+                        description = val
+                            .pointer("/videoDetails/shortDescription")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                    }
+                    if upload_date.is_none() {
+                        upload_date = val
+                            .pointer("/microformat/playerMicroformatRenderer/publishDate")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.replace('-', ""));
+                    }
+
+                    if thumbnails.is_empty()
+                        && let Some(thumbs) = val
+                            .pointer("/videoDetails/thumbnail/thumbnails")
+                            .and_then(|v| v.as_array())
+                    {
+                        for t in thumbs {
+                            if let Some(u) = t.get("url").and_then(|v| v.as_str()) {
+                                thumbnails.push(u.to_string());
+                            }
+                        }
+                    }
+
+                    if rich_meta.is_none() {
+                        rich_meta = Some(YoutubeMetadataParser::parse(&val, None));
+                    }
+
+                    // Extract formats from streamingData
+                    let client_formats = YoutubeParser::parse_player_response(&val);
+                    for mut f in client_formats {
+                        if !seen_itags.contains(&f.itag) {
+                            seen_itags.insert(f.itag);
+
+                            // Apply n-param challenge bypass
+                            if let Ok(mut parsed_url) = url::Url::parse(&f.url) {
+                                let mut query_pairs: Vec<(String, String)> = parsed_url
+                                    .query_pairs()
+                                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                                    .collect();
+                                for (k, v) in &mut query_pairs {
+                                    if k == "n" {
+                                        *v = solver.solve_n_param(v);
+                                    }
+                                }
+                                parsed_url.query_pairs_mut().clear().extend_pairs(
+                                    query_pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+                                );
+                                f.url = parsed_url.to_string();
+                            }
+
+                            formats.push(f);
+                        }
+                    }
+
+                    // Parse DASH manifest URL if present
+                    if let Some(dash_url) = val
+                        .pointer("/streamingData/dashManifestUrl")
+                        .and_then(|v| v.as_str())
+                        && let Ok(dash_resp) = self.http.get(dash_url).send().await
+                        && let Ok(dash_xml) = dash_resp.text().await
+                    {
+                        let dash_formats = YoutubeDashMpdParser::parse(&dash_xml, dash_url);
+                        for df in dash_formats {
+                            if !seen_itags.contains(&df.itag) {
+                                seen_itags.insert(df.itag);
+                                formats.push(df);
+                            }
+                        }
+                    }
+
+                    if !formats.is_empty() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if formats.is_empty() {
+            return Err(DlpError::VideoUnavailable(format!(
+                "No downloadable video formats found for YouTube ID: {}",
+                video_id
+            )));
+        }
+
+        let title_str = title.unwrap_or_else(|| format!("YouTube video #{}", video_id));
+        let uploader_str = uploader.unwrap_or_else(|| "YouTube Creator".to_string());
+        let subs = rich_meta.map(|m| m.subtitles).unwrap_or_default();
+
+        Ok(VideoMetadata {
+            id: video_id,
+            title: title_str,
+            uploader: uploader_str,
+            channel_id,
+            duration,
+            view_count,
+            description,
+            upload_date,
+            thumbnails,
+            formats,
+            subtitles: subs,
+            webpage_url: url.to_string(),
+            is_live: false,
+        })
     }
 }

@@ -4,56 +4,50 @@ use regex::Regex;
 use std::sync::LazyLock;
 use url::Url;
 
-static YOUTUBE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(?:https?://)?(?:www\.|m\.|music\.)?(?:youtube\.com/(?:watch\?v=|embed/|v/|shorts/|live/)|youtu\.be/)([a-zA-Z0-9_-]{11})").unwrap()
+static YOUTUBE_VIDEO_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?x)
+        (?:https?://)?
+        (?:
+            (?:www|m|music)\.youtube\.com/(?:watch\?.*?\bv=|embed/|v/|shorts/|live/|clip/)|
+            youtu\.be/
+        )
+        (?P<id>[a-zA-Z0-9_-]{11})
+    ",
+    )
+    .unwrap()
 });
 
-static RAW_ID_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_-]{11}$").unwrap());
-
-pub fn extract_video_id(input: &str) -> Result<VideoId> {
+pub fn extract_youtube_video_id(input: &str) -> Result<VideoId> {
     let trimmed = input.trim();
 
-    if RAW_ID_REGEX.is_match(trimmed) {
-        return Ok(VideoId::new(trimmed));
-    }
-
-    if let Some(captures) = YOUTUBE_REGEX.captures(trimmed)
-        && let Some(id) = captures.get(1)
+    if let Some(cap) = YOUTUBE_VIDEO_REGEX.captures(trimmed)
+        && let Some(id) = cap.name("id")
     {
         return Ok(VideoId::new(id.as_str()));
     }
 
-    // Try parsing as standard URL with query params
-    if let Ok(parsed) = Url::parse(trimmed)
-        && let Some(domain) = parsed.domain()
-    {
-        if domain.contains("youtube.com") {
-            for (k, v) in parsed.query_pairs() {
-                if k == "v" && v.len() == 11 {
-                    return Ok(VideoId::new(v.as_ref()));
+    if let Ok(parsed) = Url::parse(trimmed) {
+        if let Some(query) = parsed.query() {
+            for pair in query.split('&') {
+                if let Some((k, v)) = pair.split_once('=')
+                    && k == "v"
+                    && v.len() == 11
+                {
+                    return Ok(VideoId::new(v));
                 }
             }
-            // Path based check: /shorts/ID or /embed/ID
+        }
+
+        if let Some(domain) = parsed.domain()
+            && (domain.contains("youtube.com") || domain.contains("youtu.be"))
+        {
             let segments: Vec<&str> = parsed
                 .path_segments()
                 .map(|s| s.collect())
                 .unwrap_or_default();
-            if segments.len() >= 2
-                && matches!(segments[0], "shorts" | "embed" | "v" | "live")
-                && segments[1].len() == 11
-            {
-                return Ok(VideoId::new(segments[1]));
-            }
-        } else if domain.contains("youtu.be") {
-            let segments: Vec<&str> = parsed
-                .path_segments()
-                .map(|s| s.collect())
-                .unwrap_or_default();
-            if let Some(first) = segments.first()
-                && first.len() == 11
-            {
-                return Ok(VideoId::new(*first));
+            if let Some(last) = segments.into_iter().rev().find(|s| s.len() == 11) {
+                return Ok(VideoId::new(last));
             }
         }
     }
@@ -61,26 +55,14 @@ pub fn extract_video_id(input: &str) -> Result<VideoId> {
     Err(DlpError::InvalidUrl(input.to_string()))
 }
 
-pub fn extract_playlist_id(input: &str) -> Option<String> {
-    let trimmed = input.trim();
+pub fn is_youtube_url(input: &str) -> bool {
+    extract_youtube_video_id(input).is_ok()
+        || input.contains("youtube.com")
+        || input.contains("youtu.be")
+}
 
-    if trimmed.starts_with("PL")
-        || trimmed.starts_with("RD")
-        || trimmed.starts_with("UU")
-        || trimmed.starts_with("FL")
-    {
-        return Some(trimmed.to_string());
-    }
-
-    if let Ok(parsed) = Url::parse(trimmed) {
-        for (k, v) in parsed.query_pairs() {
-            if k == "list" && !v.is_empty() {
-                return Some(v.to_string());
-            }
-        }
-    }
-
-    None
+pub fn extract_playlist_id(url: &str) -> Option<String> {
+    crate::extractor::youtube::tab::extract_playlist_id(url)
 }
 
 #[cfg(test)]
@@ -88,38 +70,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_video_id() {
+    fn test_extract_youtube_video_id() {
         assert_eq!(
-            extract_video_id("dQw4w9WgXcQ").unwrap().as_str(),
-            "dQw4w9WgXcQ"
-        );
-        assert_eq!(
-            extract_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            extract_youtube_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
                 .unwrap()
                 .as_str(),
             "dQw4w9WgXcQ"
         );
         assert_eq!(
-            extract_video_id("https://youtu.be/dQw4w9WgXcQ?t=10")
+            extract_youtube_video_id("https://youtu.be/dQw4w9WgXcQ")
                 .unwrap()
                 .as_str(),
             "dQw4w9WgXcQ"
         );
-    }
-
-    #[test]
-    fn test_extract_playlist_id() {
         assert_eq!(
-            extract_playlist_id(
-                "https://www.youtube.com/playlist?list=PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj"
-            ),
-            Some("PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj".into())
+            extract_youtube_video_id("https://www.youtube.com/shorts/dQw4w9WgXcQ")
+                .unwrap()
+                .as_str(),
+            "dQw4w9WgXcQ"
         );
         assert_eq!(
-            extract_playlist_id(
-                "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj"
-            ),
-            Some("PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj".into())
+            extract_youtube_video_id("https://music.youtube.com/watch?v=dQw4w9WgXcQ")
+                .unwrap()
+                .as_str(),
+            "dQw4w9WgXcQ"
         );
     }
 }

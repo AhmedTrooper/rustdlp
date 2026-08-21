@@ -3,10 +3,45 @@ use crate::extractor::youtube::cipher::CipherHelper;
 use crate::models::format::StreamFormat;
 use crate::models::innertube::RawFormatStream;
 use regex::Regex;
+use serde_json::Value;
 use std::sync::LazyLock;
 
 static MIME_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^([^/]+)/([^;]+)(?:;\s*codecs="([^"]+)")?"#).unwrap());
+
+pub struct YoutubeParser;
+
+impl YoutubeParser {
+    pub fn parse_player_response(val: &Value) -> Vec<StreamFormat> {
+        let mut formats = Vec::new();
+        let streaming_data = val.get("streamingData").unwrap_or(val);
+
+        if let Some(arr) = streaming_data.get("formats").and_then(|v| v.as_array()) {
+            for item in arr {
+                if let Ok(raw) = serde_json::from_value::<RawFormatStream>(item.clone())
+                    && let Some(f) = parse_stream_format(&raw, "innertube")
+                {
+                    formats.push(f);
+                }
+            }
+        }
+
+        if let Some(arr) = streaming_data
+            .get("adaptiveFormats")
+            .and_then(|v| v.as_array())
+        {
+            for item in arr {
+                if let Ok(raw) = serde_json::from_value::<RawFormatStream>(item.clone())
+                    && let Some(f) = parse_stream_format(&raw, "innertube_dash")
+                {
+                    formats.push(f);
+                }
+            }
+        }
+
+        formats
+    }
+}
 
 pub fn parse_stream_format(raw: &RawFormatStream, client_name: &str) -> Option<StreamFormat> {
     let raw_url = if let Some(ref u) = raw.url {
@@ -148,11 +183,11 @@ fn parse_height_from_quality_label(label: Option<&str>) -> Option<u32> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_mime() {
+    pub fn test_parse_mime() {
         let (container, vcodec, acodec) =
             parse_mime_and_codecs(r#"video/mp4; codecs="avc1.640028, mp4a.40.2""#);
         assert_eq!(container, "mp4");

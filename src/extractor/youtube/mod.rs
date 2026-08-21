@@ -1,11 +1,21 @@
 pub mod cipher;
 pub mod client;
+pub mod dash_mpd;
 pub mod extractor;
+pub mod innertube;
+pub mod jsc;
+pub mod metadata;
 pub mod parser;
 pub mod playlist;
 pub mod subtitle;
+pub mod tab;
 pub mod url;
 
 pub use extractor::YoutubeExtractor;
+pub use innertube::InnertubeClientKind;
+pub use jsc::JsChallengeSolver;
+pub use metadata::{Chapter, StoryboardSpec, YoutubeMetadataParser, YoutubeRichMetadata};
 pub use playlist::YoutubePlaylistExtractor;
 pub use subtitle::SubtitleDownloader;
+pub use tab::YoutubeTabExtractor;
+pub use url::{extract_youtube_video_id, is_youtube_url};
