@@ -195,38 +195,56 @@ impl YoutubeTabExtractor {
                 "url": url
             });
 
-            if let Ok(resp) = self
+            let resp = self
                 .http
                 .post("https://www.youtube.com/youtubei/v1/navigation/resolve_url")
                 .json(&resolve_payload)
                 .send()
-                .await
-                && let Ok(val) = resp.json::<Value>().await
-                && let Some(bid) = val
+                .await;
+
+            let (status, val) = match resp {
+                Ok(r) => {
+                    let st = r.status();
+                    let v = r.json::<Value>().await.ok();
+                    (Some(st), v)
+                }
+                Err(_) => (None, None),
+            };
+
+            if let Some(ref v) = val
+                && let Some(bid) = v
                     .pointer("/endpoint/browseEndpoint/browseId")
                     .and_then(|v| v.as_str())
             {
                 return Ok((bid.to_string(), params, bid.to_string()));
             }
 
+            let err_suffix = match status {
+                Some(st) => format!("(navigation/resolve_url returned HTTP {})", st),
+                None => "(navigation/resolve_url network request failed)".to_string(),
+            };
+
             if let Some(h) = cap.name("handle") {
                 return Err(DlpError::ExtractionError(format!(
-                    "Could not resolve YouTube channel handle '{}' to a valid channel ID",
-                    h.as_str()
+                    "Could not resolve YouTube channel handle '{}' to a valid channel ID {}",
+                    h.as_str(),
+                    err_suffix
                 )));
             }
 
             if let Some(custom) = cap.name("custom") {
                 return Err(DlpError::ExtractionError(format!(
-                    "Could not resolve YouTube custom channel '{}' to a valid channel ID",
-                    custom.as_str()
+                    "Could not resolve YouTube custom channel '{}' to a valid channel ID {}",
+                    custom.as_str(),
+                    err_suffix
                 )));
             }
 
             if let Some(user) = cap.name("user") {
                 return Err(DlpError::ExtractionError(format!(
-                    "Could not resolve YouTube user '{}' to a valid channel ID",
-                    user.as_str()
+                    "Could not resolve YouTube user '{}' to a valid channel ID {}",
+                    user.as_str(),
+                    err_suffix
                 )));
             }
         }

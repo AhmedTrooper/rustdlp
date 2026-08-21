@@ -11,7 +11,7 @@ use crate::models::format::StreamFormat;
 use crate::models::video::VideoMetadata;
 use async_trait::async_trait;
 use regex::Regex;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, USER_AGENT};
+use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 use std::collections::HashSet;
 
